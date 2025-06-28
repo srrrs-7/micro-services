@@ -1,9 +1,15 @@
-.PHONY: test gopher rmi
+.PHONY: test gopher tidy vet rmi
+gopher:
+	docker compose run --rm gopher fish
+	
 test:
 	docker compose run --rm gopher fish -c "/go/src/.images/gopher/test.sh"
 
-gopher:
-	docker compose run --rm gopher fish
+tidy:
+	docker compose run --rm gopher fish -c "/go/src/.images/gopher/tidy.sh"
+
+vet:
+	docker compose run --rm gopher fish -c "/go/src/.images/gopher/vet.sh"
 
 rmi:
 	docker image ls | grep none | awk '{print $$3}' | xargs docker rmi
@@ -22,6 +28,7 @@ audit-down:
 	docker compose down audit audit-worker audit-db queue
 
 audit-migrate:
+	docker compose run --rm migrator /go/src/modules/audit/database/migration
 
 audit-grpc:
 	docker compose run --rm gopher protoc --proto_path=/go/src/driver/grpc/proto \

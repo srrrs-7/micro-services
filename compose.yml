@@ -9,6 +9,15 @@ services:
     volumes:
       - .:/go/src
 
+  migrator:
+    build:
+      context: ./.images/migrator
+      dockerfile: Dockerfile
+    container_name: migrator
+    working_dir: /go/src
+    volumes:
+      - .:/go/src
+
   # audit
   audit:
     build:
