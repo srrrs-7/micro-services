@@ -1,0 +1,69 @@
+services:
+  # util go container
+  gopher:
+    build:
+      context: ./.images/gopher
+      dockerfile: Dockerfile
+    container_name: gopher
+    working_dir: /go/src
+    volumes:
+      - .:/go/src
+
+  # audit
+  audit:
+    build:
+      context: ./.images/audit
+      dockerfile: Dockerfile
+    container_name: audit
+    networks:
+      - internal
+  audit-db:
+    image: postgres:latest
+    container_name: audit-db
+    environment:
+      POSTGRES_USER: audit
+      POSTGRES_PASSWORD: audit
+      POSTGRES_DB: audit_db
+    volumes:
+      - audit-db:/var/lib/postgresql/data
+    networks:
+      - internal
+
+  # auth
+  auth:
+    build:
+      context: ./.images/auth
+      dockerfile: Dockerfile
+    container_name: auth
+    networks:
+      - internal
+  auth-db:
+    image: postgres:latest
+    container_name: auth-db
+    environment:
+      POSTGRES_USER: auth
+      POSTGRES_PASSWORD: auth
+      POSTGRES_DB: auth_db
+    volumes:
+      - auth-db:/var/lib/postgresql/data
+    networks:
+      - internal
+
+  # queue
+  queue:
+    build:
+      context: ./.images/queue
+      dockerfile: Dockerfile
+    container_name: queue
+    networks:
+      - internal
+
+volumes:
+  audit-db:
+    driver: local
+  auth-db:
+    driver: local
+
+networks:
+  internal:
+    driver: bridge

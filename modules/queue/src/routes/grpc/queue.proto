@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package Queue;
+
+option go_package = "./modules/queue/routers/grpc";
+
+// The request message for the Enqueue service
+message EnqueueRequest {
+    string prompt = 1;
+}
+
+message EnqueueResponse {
+    string message = 1;
+}
+
+service EnqueueService {
+    rpc Enqueue (EnqueueRequest) returns (EnqueueResponse);
+}
+
+message DequeueRequest {
+}
+
+// The request message for the Enqueue service
+message DequeueResponse {
+    string prompt = 1;
+}
+
+service DequeueService {
+    rpc Dequeue (DequeueRequest) returns (DequeueResponse);
+}
+
+// The request message for the QueueStatus service
+message QueueStatusRequest {
+    string queue_id = 1;
+}
+
+message QueueStatusResponse {
+    string status = 1;
+}
+
+service QueueStatusService {
+    rpc GetQueueStatus (QueueStatusRequest) returns (QueueStatusResponse);
+}

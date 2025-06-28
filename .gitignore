@@ -1,0 +1,23 @@
+bin
+node_modules
+.vite
+deno.lock
+package-lock.json
+dist
+
+target
+Cargo.lock
+
+data.txt
+data
+
+redoc/doc
+
+log
+wasm_pkg
+
+.php-cs-fixer.cache
+# SpecStory explanation file
+.specstory/.what-is-this.md
+
+compose.override.yml
