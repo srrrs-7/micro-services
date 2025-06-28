@@ -28,7 +28,8 @@ audit-down:
 	docker compose down audit audit-worker audit-db queue
 
 audit-migrate:
-	docker compose run --rm migrator /go/src/modules/audit/database/migration
+	docker compose run --rm migrator migrate hash --dir file:///go/src/modules/audit/migrator
+	docker compose run --rm migrator migrate apply --url postgres://root:root@audit-db:5432/auth?sslmode=disable --dir file:///go/audit/migrator
 
 audit-grpc:
 	docker compose run --rm gopher protoc --proto_path=/go/src/driver/grpc/proto \
@@ -48,6 +49,8 @@ auth-down:
 	docker compose down auth auth-db
 
 auth-migrate:
+	docker compose run --rm migrator migrate hash --dir file:///go/src/modules/auth/migrator
+	docker compose run --rm migrator migrate apply --url postgres://root:root@auth-db:5432/auth?sslmode=disable --dir file:///go/auth/migrator
 
 auth-grpc:
 	docker compose run --rm gopher protoc --proto_path=/go/src/driver/grpc/proto \
