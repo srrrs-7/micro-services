@@ -1,4 +1,4 @@
-.PHONY: test gopher tidy vet rmi
+.PHONY: test gopher tidy vet rmi new-migrate
 gopher:
 	docker compose run --rm gopher fish
 	
@@ -13,6 +13,9 @@ vet:
 
 rmi:
 	docker image ls | grep none | awk '{print $$3}' | xargs docker rmi
+
+new-migrate:
+	docker compose run --rm migrator migrate new --dir file:///go/modules/audit/database/migration
 
 # audit
 .PHONY: audit audit-up audit-build audit-down audit-migrate audit-grpc
