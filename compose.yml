@@ -17,10 +17,10 @@ services:
       - .:/go/src
 
   # audit
-  audit:
+  audit-api:
     build:
       dockerfile: ./.images/audit/api.Dockerfile
-    container_name: audit
+    container_name: audit-api
     networks:
       - internal
   audit-db:
@@ -42,10 +42,10 @@ services:
       - internal
 
   # auth
-  auth:
+  auth-api:
     build:
       dockerfile: ./.images/auth/api.Dockerfile
-    container_name: auth
+    container_name: auth-api
     networks:
       - internal
   auth-db:
@@ -61,10 +61,10 @@ services:
       - internal
 
   # queue
-  queue:
+  queue-api:
     build:
       dockerfile: ./.images/queue/Dockerfile
-    container_name: queue
+    container_name: queue-api
     networks:
       - internal
 

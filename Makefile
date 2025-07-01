@@ -19,13 +19,13 @@ rmi:
 audit: audit-build audit-up
 
 audit-up:
-	docker compose up -d audit audit-worker audit-db queue
+	docker compose up -d audit-api audit-worker audit-db queue-api
 
 audit-build:
-	docker compose build audit audit-worker audit-db queue
+	docker compose build audit-api audit-worker audit-db queue-api
 
 audit-down:
-	docker compose down audit audit-worker audit-db queue
+	docker compose down audit-api audit-worker audit-db queue-api
 
 audit-migrate:
 	docker compose run --rm migrator migrate hash --dir file:///go/src/modules/audit/migrator
@@ -40,13 +40,13 @@ audit-grpc:
 auth: auth-build auth-up
 
 auth-up:
-	docker compose up -d auth auth-db
+	docker compose up -d auth-api auth-db
 
 auth-build:
-	docker compose build auth auth-db
+	docker compose build auth-api auth-db
 
 auth-down:
-	docker compose down auth auth-db
+	docker compose down auth-api auth-db
 
 auth-migrate:
 	docker compose run --rm migrator migrate hash --dir file:///go/src/modules/auth/migrator
