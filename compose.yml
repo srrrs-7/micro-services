@@ -2,8 +2,7 @@ services:
   # util go container
   gopher:
     build:
-      context: ./.images/gopher
-      dockerfile: Dockerfile
+      dockerfile: ./.images/gopher/Dockerfile
     container_name: gopher
     working_dir: /go/src
     volumes:
@@ -11,8 +10,7 @@ services:
 
   migrator:
     build:
-      context: ./.images/migrator
-      dockerfile: Dockerfile
+      dockerfile: ./.images/migrator/Dockerfile
     container_name: migrator
     working_dir: /go/src
     volumes:
@@ -21,8 +19,7 @@ services:
   # audit
   audit:
     build:
-      context: ./.images/audit
-      dockerfile: Dockerfile
+      dockerfile: ./.images/audit/api.Dockerfile
     container_name: audit
     networks:
       - internal
@@ -37,12 +34,17 @@ services:
       - audit-db:/var/lib/postgresql/data
     networks:
       - internal
+  audit-worker:
+    build:
+      dockerfile: ./.images/audit/worker.Dockerfile
+    container_name: audit-worker
+    networks:
+      - internal
 
   # auth
   auth:
     build:
-      context: ./.images/auth
-      dockerfile: Dockerfile
+      dockerfile: ./.images/auth/api.Dockerfile
     container_name: auth
     networks:
       - internal
@@ -61,8 +63,7 @@ services:
   # queue
   queue:
     build:
-      context: ./.images/queue
-      dockerfile: Dockerfile
+      dockerfile: ./.images/queue/Dockerfile
     container_name: queue
     networks:
       - internal
