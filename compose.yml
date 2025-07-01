@@ -14,7 +14,9 @@ services:
     container_name: migrator
     working_dir: /go/src
     volumes:
-      - .:/go/src
+      - .:/go
+    networks:
+      - internal
 
   # audit
   audit-api:
@@ -26,10 +28,12 @@ services:
   audit-db:
     image: postgres:latest
     container_name: audit-db
+    ports:
+      - 5432:5432
     environment:
+      POSTGRES_DB: audit
       POSTGRES_USER: audit
       POSTGRES_PASSWORD: audit
-      POSTGRES_DB: audit_db
     volumes:
       - audit-db:/var/lib/postgresql/data
     networks:
@@ -51,10 +55,12 @@ services:
   auth-db:
     image: postgres:latest
     container_name: auth-db
+    ports:
+      - 5433:5432
     environment:
+      POSTGRES_DB: auth
       POSTGRES_USER: auth
       POSTGRES_PASSWORD: auth
-      POSTGRES_DB: auth_db
     volumes:
       - auth-db:/var/lib/postgresql/data
     networks:
