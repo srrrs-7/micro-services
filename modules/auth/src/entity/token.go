@@ -11,10 +11,10 @@ type AccessToken Token
 type RefreshToken Token
 
 type Token struct {
-	UserID  UserID
-	Scope   Scope
-	Role    Role
-	Expired Expired
+	UserID  UserID  `json:"user_id,omitempty"`
+	Scope   Scope   `json:"scope,omitempty"`
+	Role    Role    `json:"role,omitempty"`
+	Expired Expired `json:"expired,omitempty"`
 }
 
 func NewAccessToken(uid UserID, scope Scope, role Role) AccessToken {

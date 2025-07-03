@@ -26,6 +26,12 @@ func ResponseOk(w http.ResponseWriter, msg []byte) {
 	w.Write(msg)
 }
 
+func ResponseAccepted(w http.ResponseWriter, msg []byte) {
+	w.Header().Set(CONTENT_TYPE, APPLICATION_JSON)
+	w.WriteHeader(http.StatusAccepted)
+	w.Write(msg)
+}
+
 func ResponseInternalServerError(w http.ResponseWriter, msg []byte) {
 	w.Header().Set(CONTENT_TYPE, APPLICATION_JSON)
 	w.WriteHeader(http.StatusInternalServerError)
