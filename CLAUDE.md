@@ -6,11 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Go-based microservices architecture with the following services:
 - **audit**: Audit service with API and worker components
-- **auth**: Authentication service 
-- **queue**: Queue service with gRPC API
-- **shared**: Shared utilities and logging
+- **auth**: Authentication service with Redis cache
+- **queue**: Queue service with gRPC API for enqueue/dequeue operations
+- **shared**: Shared utilities including HTTP and logging helpers
 
-Each service is containerized with Docker and orchestrated via Docker Compose. Services communicate via gRPC protocols.
+Each service is containerized with Docker and orchestrated via Docker Compose. Services communicate via gRPC protocols. The auth service uses Redis for caching.
 
 ## Common Commands
 
