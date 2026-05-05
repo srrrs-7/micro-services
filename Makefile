@@ -8,29 +8,29 @@ MODS := auth audit queue shared
 	
 test:
 	for mod in $(MODS); do \
-		go test -v -coverprofile=coverage.out -covermode=atomic ./modules/$$mod/...; \
+		cd /workspace/main/modules/$$mod/src && go test -v -coverprofile=coverage.out -covermode=atomic ./...; \
 		cat coverage.out >> coverage.txt; \
 		rm coverage.out; \
 	done
 
 fmt:
 	for mod in $(MODS); do \
-		go fmt ./modules/$$mod/...; \
+		cd /workspace/main/modules/$$mod/src && go fmt ./...; \
 	done
 
 tidy:
 	for mod in $(MODS); do \
-		go mod tidy -v -go=1.20 ./modules/$$mod; \
+		cd /workspace/main/modules/$$mod/src && go mod tidy; \
 	done
 
 vet:
 	for mod in $(MODS); do \
-		go vet ./modules/$$mod/...; \
+		cd /workspace/main/modules/$$mod/src && go vet ./...; \
 	done
 
 lint:
 	for mod in $(MODS); do \
-		golangci-lint run ./modules/$$mod/...; \
+		cd /workspace/main/modules/$$mod/src && golangci-lint run ./...; \
 	done
 
 rmi:
