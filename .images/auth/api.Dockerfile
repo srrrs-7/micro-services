@@ -8,7 +8,7 @@ ARG GOARCH=amd64
 ARG CGO_ENABLED=false
 RUN go build -ldflags="-s -w" -o /go/bin/api ./cmd/api
 
-FROM debian:latest
+FROM alpine:latest
 COPY --from=builder /go/bin/api /usr/local/bin/api
 
 EXPOSE 8080

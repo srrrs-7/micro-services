@@ -1,8 +1,8 @@
 package main
 
 import (
-	"auth/driver/cache"
-	"auth/driver/db"
+	"auth/infra/cache"
+	"auth/infra/db"
 	"fmt"
 	"os"
 )

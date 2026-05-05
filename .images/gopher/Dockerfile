@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine
+FROM golang:latest
 
 # protocバイナリ自体をインストール
 RUN apk add --no-cache protobuf protobuf-dev fish

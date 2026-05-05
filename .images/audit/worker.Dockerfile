@@ -8,7 +8,7 @@ ARG GOARCH=amd64
 ARG CGO_ENABLED=false
 RUN go build -ldflags="-s -w" -o /go/bin/worker ./cmd/worker
 
-FROM debian:latest
+FROM alpine:latest
 COPY --from=builder /go/bin/worker /usr/local/bin/worker
 
 CMD [ "/usr/local/bin/worker" ]
