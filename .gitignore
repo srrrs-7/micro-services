@@ -3,6 +3,6 @@ setup.personal.sh
 .env
 .env.*
 
-coverage.*
+coverage.txt
 
 compose.override.yml
