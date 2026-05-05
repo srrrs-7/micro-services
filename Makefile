@@ -52,7 +52,7 @@ new-migrate:
 hooks-install:
 	@echo "Installing git hooks..."
 	@mkdir -p .githooks
-	@printf '#!/bin/sh\necho "Running pre-commit hooks..."\nmake fmt && make vet\n' > .githooks/pre-commit
+	@printf '#!/bin/sh\necho "Running pre-commit hooks..."\nmake fmt && make vet && make lint\n' > .githooks/pre-commit
 	@printf '#!/bin/sh\necho "Running pre-push hooks..."\nmake test\n' > .githooks/pre-push
 	@chmod +x .githooks/pre-commit .githooks/pre-push
 	@git config core.hooksPath .githooks
