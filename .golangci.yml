@@ -1,0 +1,42 @@
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - errcheck       # エラーハンドリング漏れ検出
+    - govet          # go vet
+    - staticcheck    # 高度な静的解析 (gosimple含む)
+    - unused         # 未使用コード検出
+    - ineffassign    # 無効な代入検出
+    - misspell       # スペルミス検出
+  exclusions:
+    # std-error-handling プリセット: 標準的なエラーハンドリングの除外
+    presets:
+      - std-error-handling
+    rules:
+      # テストファイルでは errcheck を緩和
+      - path: '(.+)_test\.go'
+        linters:
+          - errcheck
+      # testutil パッケージでは errcheck を緩和
+      - path: 'testutil/'
+        linters:
+          - errcheck
+      # HTTP ResponseWriter.Write (書き込み失敗時に対処方法がない)
+      - text: 'Error return value of `w\.Write` is not checked'
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt          # フォーマットチェック
+    - goimports      # import文の整理チェック
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+  misspell:
+    locale: US

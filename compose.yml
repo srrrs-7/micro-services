@@ -23,6 +23,9 @@ services:
     build:
       dockerfile: ./.images/audit/api.Dockerfile
     container_name: audit-api
+    depends_on:
+      audit-db: 
+        condition: service_healthy
     networks:
       - internal
   audit-db:
@@ -36,6 +39,11 @@ services:
       POSTGRES_PASSWORD: audit
     volumes:
       - audit-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U audit -d audit"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     networks:
       - internal
   audit-worker:
@@ -50,6 +58,11 @@ services:
     build:
       dockerfile: ./.images/auth/api.Dockerfile
     container_name: auth-api
+    depends_on:
+      auth-db: 
+        condition: service_healthy
+      auth_cache:
+        condition: service_healthy
     networks:
       - internal
   auth-db:
@@ -63,6 +76,11 @@ services:
       POSTGRES_PASSWORD: auth
     volumes:
       - auth-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auth -d auth"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     networks:
       - internal
   auth_cache:
@@ -70,6 +88,11 @@ services:
     container_name: auth-cache
     ports:
       - 6379:6379
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     networks:
       - internal
 

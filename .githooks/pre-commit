@@ -1,0 +1,3 @@
+#!/bin/sh
+echo "Running pre-commit hooks..."
+make fmt && make vet

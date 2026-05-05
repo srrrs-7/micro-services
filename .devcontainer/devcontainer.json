@@ -1,0 +1,32 @@
+// Strategy
+// - Use Dev Container Features if possible
+// - Use docker-compose to launch services
+// - Use Dockerfile if it needs to be cached
+// - Use setup.sh to run commands that don't need to be cached
+// - Use setup.personal.sh for personal setup such as dotfiles
+{
+  "name": "go-fp",
+  "dockerComposeFile": ["compose.yaml"],
+  "service": "dev",
+  "workspaceFolder": "/workspace/main",
+  "remoteUser": "vscode",
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/go": {
+      "version": "1.26"
+    },
+    "ghcr.io/devcontainers/features/terraform:1": {},
+    "ghcr.io/devcontainers/features/aws-cli:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["golang.go"],
+      "settings": {
+        "editor.formatOnSave": true
+      }
+    }
+  },
+  "postCreateCommand": "chmod +x .devcontainer/setup.sh && sudo .devcontainer/setup.sh",
+  "forwardPorts": []
+}
