@@ -1,19 +1,37 @@
-##################
-## dev commands ##
-##################
-.PHONY: test gopher tidy vet rmi rmv new-migrate
 
-gopher:
-	docker compose run --rm gopher fish
+MODS := auth audit queue shared
+
+###########################
+## devcontainer commands ##
+###########################
+.PHONY: test tidy vet rmi rmv new-migrate
 	
 test:
-	docker compose run --rm gopher fish -c "/go/src/.images/gopher/test.sh"
+	for mod in $(MODS); do \
+		go test -v -coverprofile=coverage.out -covermode=atomic ./modules/$$mod/...; \
+		cat coverage.out >> coverage.txt; \
+		rm coverage.out; \
+	done
+
+fmt:
+	for mod in $(MODS); do \
+		go fmt ./modules/$$mod/...; \
+	done
 
 tidy:
-	docker compose run --rm gopher fish -c "/go/src/.images/gopher/tidy.sh"
+	for mod in $(MODS); do \
+		go mod tidy -v -go=1.20 ./modules/$$mod; \
+	done
 
 vet:
-	docker compose run --rm gopher fish -c "/go/src/.images/gopher/vet.sh"
+	for mod in $(MODS); do \
+		go vet ./modules/$$mod/...; \
+	done
+
+lint:
+	for mod in $(MODS); do \
+		golangci-lint run ./modules/$$mod/...; \
+	done
 
 rmi:
 	docker image ls | grep none | awk '{print $$3}' | xargs docker rmi

@@ -5,7 +5,7 @@
 // - Use setup.sh to run commands that don't need to be cached
 // - Use setup.personal.sh for personal setup such as dotfiles
 {
-  "name": "go-fp",
+  "name": "Go Microservices Dev Container",
   "dockerComposeFile": ["compose.yaml"],
   "service": "dev",
   "workspaceFolder": "/workspace/main",
