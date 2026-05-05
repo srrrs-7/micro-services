@@ -1,4 +1,0 @@
-mode: atomic
-audit/route/route.go:3.25,5.2 1 0
-audit/cmd/worker/main.go:5.13,7.2 1 0
-audit/cmd/api/main.go:5.13,7.2 1 0
