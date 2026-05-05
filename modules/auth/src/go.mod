@@ -4,7 +4,6 @@ go 1.24.4
 
 require (
 	github.com/go-chi/chi v1.5.5
-	github.com/google/uuid v1.6.0
 	github.com/redis/go-redis/v9 v9.11.0
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.30.0
