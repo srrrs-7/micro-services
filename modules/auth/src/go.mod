@@ -1,6 +1,6 @@
 module auth
 
-go 1.24.4
+go 1.26.0
 
 require (
 	github.com/go-chi/chi v1.5.5

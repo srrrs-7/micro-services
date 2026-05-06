@@ -1,5 +1,5 @@
 module shared
 
-go 1.24.4
+go 1.26.0
 
 require github.com/goccy/go-json v0.10.5
