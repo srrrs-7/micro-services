@@ -45,36 +45,29 @@ func ResponseAccepted[T any](w http.ResponseWriter, msg T) {
 }
 
 func ResponseError(w http.ResponseWriter, err error) {
-	var (
-		notFoundErr       NotFoundError
-		badRequestErr     BadRequestError
-		internalServerErr InternalServerError
-		unauthorizedErr   UnauthorizedError
-		forbiddenErr      ForbiddenError
-		conflictErr       ConflictError
-		tooManyReqErr     TooManyRequestsError
-		dbErr             DBError
-	)
-
-	switch {
-	case errors.As(err, &notFoundErr):
-		responseNotFound(w, notFoundErr)
-	case errors.As(err, &badRequestErr):
-		responseBadRequest(w, badRequestErr)
-	case errors.As(err, &internalServerErr):
-		responseInternalServerError(w, internalServerErr)
-	case errors.As(err, &unauthorizedErr):
-		responseUnauthorized(w, unauthorizedErr)
-	case errors.As(err, &forbiddenErr):
-		responseForbidden(w, forbiddenErr)
-	case errors.As(err, &conflictErr):
-		responseConflict(w, conflictErr)
-	case errors.As(err, &tooManyReqErr):
-		responseTooManyRequests(w, tooManyReqErr)
-	case errors.As(err, &dbErr):
-		responseInternalServerError(w, dbErr)
-	default:
+	var appErr AppError
+	if !errors.As(err, &appErr) {
 		responseInternalServerError(w, err)
+		return
+	}
+
+	switch appErr.Type {
+	case ErrNotFound:
+		responseNotFound(w, appErr)
+	case ErrBadRequest:
+		responseBadRequest(w, appErr)
+	case ErrUnauthorized:
+		responseUnauthorized(w, appErr)
+	case ErrForbidden:
+		responseForbidden(w, appErr)
+	case ErrConflict:
+		responseConflict(w, appErr)
+	case ErrTooManyRequests:
+		responseTooManyRequests(w, appErr)
+	case ErrInternalServer, ErrDatabase:
+		responseInternalServerError(w, appErr)
+	default:
+		responseInternalServerError(w, appErr)
 	}
 }
 

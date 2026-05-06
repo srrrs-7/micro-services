@@ -1,65 +1,99 @@
 package utilhttp
 
-type NotFoundError struct {
+type ErrorType int
+
+const (
+	ErrNotFound ErrorType = iota
+	ErrBadRequest
+	ErrInternalServer
+	ErrUnauthorized
+	ErrForbidden
+	ErrConflict
+	ErrTooManyRequests
+	ErrDatabase
+)
+
+func (e ErrorType) String() string {
+	switch e {
+	case ErrNotFound:
+		return "not found"
+	case ErrBadRequest:
+		return "bad request"
+	case ErrInternalServer:
+		return "internal server error"
+	case ErrUnauthorized:
+		return "unauthorized"
+	case ErrForbidden:
+		return "forbidden"
+	case ErrConflict:
+		return "conflict"
+	case ErrTooManyRequests:
+		return "too many requests"
+	case ErrDatabase:
+		return "database error"
+	default:
+		return "unknown error"
+	}
+}
+
+type AppError struct {
+	Type    ErrorType
 	Message string
 }
 
-func (e NotFoundError) Error() string {
+// Error() を AppError に持たせる → 各型で実装不要
+func (e AppError) Error() string {
 	return e.Message
 }
 
-type BadRequestError struct {
-	Message string
+func newAppError(t ErrorType, err error) AppError {
+	return AppError{Type: t, Message: err.Error()}
 }
 
-func (e BadRequestError) Error() string {
-	return e.Message
+type NotFoundError struct{ AppError }
+
+func NewNotFoundError(err error) NotFoundError {
+	return NotFoundError{newAppError(ErrNotFound, err)}
 }
 
-type InternalServerError struct {
-	Message string
+type BadRequestError struct{ AppError }
+
+func NewBadRequestError(err error) BadRequestError {
+	return BadRequestError{newAppError(ErrBadRequest, err)}
 }
 
-func (e InternalServerError) Error() string {
-	return e.Message
+type InternalServerError struct{ AppError }
+
+func NewInternalServerError(err error) InternalServerError {
+	return InternalServerError{newAppError(ErrInternalServer, err)}
 }
 
-type UnauthorizedError struct {
-	Message string
+type UnauthorizedError struct{ AppError }
+
+func NewUnauthorizedError(err error) UnauthorizedError {
+	return UnauthorizedError{newAppError(ErrUnauthorized, err)}
 }
 
-func (e UnauthorizedError) Error() string {
-	return e.Message
+type ForbiddenError struct{ AppError }
+
+func NewForbiddenError(err error) ForbiddenError {
+	return ForbiddenError{newAppError(ErrForbidden, err)}
 }
 
-type ForbiddenError struct {
-	Message string
+type ConflictError struct{ AppError }
+
+func NewConflictError(err error) ConflictError {
+	return ConflictError{newAppError(ErrConflict, err)}
 }
 
-func (e ForbiddenError) Error() string {
-	return e.Message
+type TooManyRequestsError struct{ AppError }
+
+func NewTooManyRequestsError(err error) TooManyRequestsError {
+	return TooManyRequestsError{newAppError(ErrTooManyRequests, err)}
 }
 
-type ConflictError struct {
-	Message string
-}
+type DBError struct{ AppError }
 
-func (e ConflictError) Error() string {
-	return e.Message
-}
-
-type TooManyRequestsError struct {
-	Message string
-}
-
-func (e TooManyRequestsError) Error() string {
-	return e.Message
-}
-
-type DBError struct {
-	Message string
-}
-
-func (e DBError) Error() string {
-	return e.Message
+func NewDBError(err error) DBError {
+	return DBError{newAppError(ErrDatabase, err)}
 }

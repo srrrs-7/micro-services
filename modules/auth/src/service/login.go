@@ -4,6 +4,7 @@ import (
 	"auth/domain"
 	"auth/infra/database/db"
 	"context"
+	"fmt"
 	"shared/utilhttp"
 )
 
@@ -18,11 +19,11 @@ func NewLoginService(repo db.Querier) LoginService {
 func (s LoginService) Post(ctx context.Context, input domain.LoginInput) (*domain.Token, error) {
 	user, err := s.repo.GetUser(ctx, input.Email)
 	if err != nil {
-		return nil, utilhttp.DBError{Message: "Failed to retrieve user from database"}
+		return nil, utilhttp.NewDBError(fmt.Errorf("Failed to retrieve user from database: %v", err))
 	}
 
 	if user.Password != input.Password {
-		return nil, utilhttp.UnauthorizedError{Message: "Invalid credentials"}
+		return nil, utilhttp.NewUnauthorizedError(fmt.Errorf("Invalid credentials"))
 	}
 
 	return &domain.Token{}, nil
