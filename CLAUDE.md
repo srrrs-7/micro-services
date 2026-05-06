@@ -2,63 +2,60 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Architecture Overview
+## Repository Layout
 
-This is a Go-based microservices architecture with the following services:
-- **audit**: Audit service with API and worker components
-- **auth**: Authentication service with Redis cache
-- **queue**: Queue service with gRPC API for enqueue/dequeue operations
-- **shared**: Shared utilities including HTTP and logging helpers
+A Go workspace (`modules/go.work`, Go 1.26.0) containing four modules under `modules/`:
 
-Each service is containerized with Docker and orchestrated via Docker Compose. Services communicate via gRPC protocols. The auth service uses Redis for caching.
+- `audit/src` — audit service, split into `cmd/api` and `cmd/worker` entry points
+- `auth/src` — auth service (HTTP API only), backed by Postgres + Redis cache
+- `queue/src` — queue service exposing a gRPC API (proto: `modules/queue/src/route/grpc/queue.proto`)
+- `shared/src` — cross-service helpers: `utilhttp` (typed `AppError` + JSON request/response helpers) and `utillog` (slog JSON logger)
+
+Each service module follows the same internal layout: `cmd/<binary>/main.go` wires env → infra → service → route, while the layers live under `domain/` (entities, inputs), `service/` (business logic over `db.Querier`), `infra/database/` (sqlc + migrations), `infra/cache/` (auth only), and `route/` (chi HTTP router; gRPC for queue).
+
+Service-to-service calls go over an internal Docker bridge network (`compose.yml`). When working on `audit`, `make audit` also brings up `queue-api` because the audit worker is expected to consume from it.
+
+## Toolchain
+
+Three code-gen / migration tools are required and are pre-installed in the devcontainer (`.devcontainer/Dockerfile`):
+
+- **sqlc** generates the `infra/database/db/` package from `migrations/*.sql` (schema) + `queries/*.sql` (queries). Regenerate with `make audit-sqlc-gen` / `make auth-sqlc-gen`. Do not edit files in `infra/database/db/` by hand — they are regenerated.
+- **Atlas** runs migrations via the `migrator` container (see `.images/migrator/Dockerfile`). The `*-migrate` targets first run `migrate hash` (updates `atlas.sum`) and then `migrate apply` against the service DB.
+- **golangci-lint** v2 config in `.golangci.yml`: enables `errcheck` (with type-assertion checks), `govet`, `staticcheck`, `unused`, `ineffassign`, `misspell` (US), `exhaustive`, `gocritic`, `dupl`; formatters `gofmt` + `goimports`. `errcheck` is relaxed in `*_test.go`, `testutil/`, and for `w.Write`.
 
 ## Common Commands
 
-### Development Environment
-- `make gopher` - Enter interactive Go development container
-- `make test` - Run all tests across all modules
-- `make tidy` - Run go mod tidy on all modules  
-- `make vet` - Run go vet on all modules
+All commands run from the repo root unless noted. The `MODS` variable in the `Makefile` is `auth audit queue shared` — module-wide targets iterate that list.
 
-### Service Management
-- `make audit` - Build and start audit service (API + worker + database + queue)
-- `make auth` - Build and start auth service (API + database)
-- `make audit-migrate` - Run database migrations for audit service
-- `make auth-migrate` - Run database migrations for auth service
+### Workspace-wide
+- `make test` — runs `go test -v -coverprofile=coverage.out ./...` per module and prints the `total:` coverage line; HTML report written to `coverage.html`
+- `make fmt` / `make vet` / `make lint` — per-module `go fmt`, `go vet`, `golangci-lint run`
+- `make tidy` / `make update` — `go mod tidy` (and `go get -u ./...` for `update`) per module
+- `make hooks` — installs git hooks at `.githooks/` (pre-commit: `fmt + vet + lint`; pre-push: `test`) and points `core.hooksPath` at it. Run after first checkout. `make hooks-uninstall` removes them.
 
-### Database Migrations
-- `make new-migrate MODULE=<service_name>` - Create new migration for specified module
-- Migrations are stored in `modules/<service>/database/migration/`
-
-### Container Management
-- `make rmi` - Remove dangling Docker images
-- `make rmv` - Prune Docker volumes
-
-## Project Structure
-
+### Running a single test
+There is no make target for a single test. Run `go test` directly inside the module (each module is its own Go module):
 ```
-modules/
-├── audit/src/          # Audit service (Go 1.24.4)
-│   ├── cmd/api/        # API server entry point
-│   ├── cmd/worker/     # Worker process entry point
-│   ├── domain/         # Business logic
-│   └── driver/         # Database/external adapters
-├── auth/src/           # Auth service (Go 1.24.4)
-│   ├── cmd/api/        # API server entry point
-│   ├── domain/token/   # Token management
-│   └── driver/         # Database/external adapters
-├── queue/src/          # Queue service (Go 1.24.4)
-│   ├── cmd/api/        # gRPC API server
-│   ├── routes/grpc/    # gRPC protocol definitions
-│   └── domain/         # Business logic
-└── shared/src/         # Shared utilities (Go 1.24.4)
-    └── logging/        # Common logging utilities
+cd modules/<service>/src && go test -run TestName ./path/to/pkg
 ```
 
-## Development Notes
+### Per-service stack (Docker Compose)
+- `make audit` ≡ `audit-build` + `audit-up` + `audit-migrate`. Brings up `audit-api`, `audit-worker`, `audit-db`, `queue-api`, `migrator`. `make audit-down` stops them.
+- `make auth` ≡ `auth-build` + `auth-up` + `auth-migrate`. Brings up `auth-api`, `auth-db`, `migrator` (note: the auth API depends on the `auth_cache` Redis service in `compose.yml`, but `auth-up` does not start it — start it explicitly with `docker compose up -d auth_cache` if running auth-api locally).
+- Postgres ports: audit `5432`, auth `5433`. Redis: `6379`. API containers expose `8080` internally.
 
-- All services use Go 1.24.4
-- PostgreSQL databases run on ports 5432 (audit) and 5433 (auth)  
-- gRPC protocol definitions are in `modules/queue/src/routes/grpc/queue.proto`
-- Database migrations use Atlas migration tool via the migrator container
-- Tests run via the gopher container across all modules simultaneously
+### Migrations
+- New migration: `make audit-new-migrate` or `make auth-new-migrate` (NOT `make new-migrate MODULE=...`). These shell into the `migrator` container and call `atlas migrate new`.
+- Apply: `make audit-migrate` / `make auth-migrate`.
+- Migration files live at `modules/<service>/src/infra/database/migrations/`.
+
+### Cleanup
+- `make rmi` — remove dangling Docker images
+- `make rmv` — `docker volume prune`
+
+## Conventions Worth Knowing
+
+- **Errors across HTTP**: services return typed errors from `shared/utilhttp` (e.g. `NewDBError`, `NewUnauthorizedError`). The route layer calls `utilhttp.ResponseError(w, err)` which type-switches on `AppError.Type` to the right HTTP status. Add new error categories by extending `ErrorType` and the switch in both `error.go` and `response.go`.
+- **Request decoding**: `utilhttp.RequestBody[T]` and `RequestUrlParam[T]` require `T` to implement `Validate() error` (the `Validator` interface). New request types under `route/request/` must satisfy this.
+- **Logging**: call `utillog.NewLogger()` once in `init()` to install a JSON `slog` handler at debug level, then use `slog` directly.
+- **Generated code**: `infra/database/db/*.go` (sqlc output) and the unimplemented gRPC stubs under `modules/queue/src/route/grpc/` are generated — modify the source (`.sql` queries, `.proto`) and regenerate.
