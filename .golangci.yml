@@ -12,6 +12,9 @@ linters:
     - unused         # 未使用コード検出
     - ineffassign    # 無効な代入検出
     - misspell       # スペルミス検出
+    - exhaustivestruct  # 構造体リテラルのフィールド漏れ検出
+    - gocritic       # コード品質向上のための多様なチェック
+    - dupl           # 重複コード検出
   exclusions:
     # std-error-handling プリセット: 標準的なエラーハンドリングの除外
     presets:
