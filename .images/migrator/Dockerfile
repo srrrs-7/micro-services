@@ -3,5 +3,6 @@ RUN curl -sSf https://atlasgo.sh | sh
 
 FROM alpine:latest
 COPY --from=builder /usr/local/bin/atlas /usr/local/bin/atlas
+COPY . /go
 
 ENTRYPOINT [ "/usr/local/bin/atlas" ]

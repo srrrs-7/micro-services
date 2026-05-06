@@ -4,5 +4,6 @@ setup.personal.sh
 .env.*
 
 coverage.txt
+coverage.html
 
 compose.override.yml

@@ -1,17 +1,17 @@
 services:
   migrator:
     build:
+      context: .
       dockerfile: ./.images/migrator/Dockerfile
     container_name: migrator
     working_dir: /go/src
-    volumes:
-      - .:/go
     networks:
       - internal
 
   # audit
   audit-api:
     build:
+      context: .
       dockerfile: ./.images/audit/api.Dockerfile
     container_name: audit-api
     depends_on:
@@ -47,6 +47,7 @@ services:
   # auth
   auth-api:
     build:
+      context: .
       dockerfile: ./.images/auth/api.Dockerfile
     container_name: auth-api
     depends_on:
@@ -90,6 +91,7 @@ services:
   # queue
   queue-api:
     build:
+      context: .
       dockerfile: ./.images/queue/Dockerfile
     container_name: queue-api
     networks:

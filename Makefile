@@ -9,8 +9,10 @@ MODS := auth audit queue shared
 test:
 	for mod in $(MODS); do \
 		echo "--- Running tests for module: $$mod ---"; \
-		cd /workspace/main/modules/$$mod/src && go test -v -coverprofile=coverage.out -covermode=atomic ./...; \
-		cat coverage.out >> coverage.txt; \
+		cd /workspace/main/modules/$$mod/src && go test -v -coverprofile=coverage.out ./...; \
+		cat coverage.out > coverage.txt; \
+		go tool cover -func=coverage.txt | grep total; \
+		go tool cover -html=coverage.txt -o coverage.html; \
 		rm coverage.out; \
 	done
 
@@ -86,10 +88,10 @@ hooks: hooks-install
 audit: audit-build audit-up audit-migrate
 
 audit-up:
-	docker compose up -d audit-api audit-worker audit-db queue-api
+	docker compose up -d audit-api audit-worker audit-db queue-api migrator
 
 audit-build:
-	docker compose build audit-api audit-worker audit-db queue-api
+	docker compose build audit-api audit-worker audit-db queue-api migrator
 
 audit-down:
 	docker compose down audit-api audit-worker audit-db queue-api
@@ -112,10 +114,10 @@ audit-sqlc-gen:
 auth: auth-build auth-up auth-migrate
 
 auth-up:
-	docker compose up -d auth-api auth-db
+	docker compose up -d auth-api auth-db migrator
 
 auth-build:
-	docker compose build auth-api auth-db
+	docker compose build auth-api auth-db migrator
 
 auth-down:
 	docker compose down auth-api auth-db
