@@ -53,6 +53,7 @@ func ResponseError(w http.ResponseWriter, err error) {
 		forbiddenErr      ForbiddenError
 		conflictErr       ConflictError
 		tooManyReqErr     TooManyRequestsError
+		dbErr             DBError
 	)
 
 	switch {
@@ -70,6 +71,8 @@ func ResponseError(w http.ResponseWriter, err error) {
 		responseConflict(w, conflictErr)
 	case errors.As(err, &tooManyReqErr):
 		responseTooManyRequests(w, tooManyReqErr)
+	case errors.As(err, &dbErr):
+		responseInternalServerError(w, dbErr)
 	default:
 		responseInternalServerError(w, err)
 	}
