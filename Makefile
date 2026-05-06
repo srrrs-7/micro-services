@@ -95,11 +95,11 @@ audit-down:
 	docker compose down audit-api audit-worker audit-db queue-api
 
 audit-new-migrate:
-	docker compose run --rm migrator migrate new --dir file:///go/modules/audit/infra/database/migration
+	docker compose run --rm migrator migrate new --dir file:///go/modules/audit/src/infra/database/migrations
 
 audit-migrate:
-	docker compose run --rm migrator migrate hash --dir file:///go/modules/audit/infra/database/migration
-	docker compose run --rm migrator migrate apply --url postgres://audit:audit@audit-db:5432?sslmode=disable --dir file:///go/modules/audit/infra/database/migration
+	docker compose run --rm migrator migrate hash --dir file:///go/modules/audit/src/infra/database/migrations
+	docker compose run --rm migrator migrate apply --url postgres://audit:audit@audit-db:5432?sslmode=disable --dir file:///go/modules/audit/src/infra/database/migrations
 
 audit-sqlc-gen:
 	cd /workspace/main/modules/audit/src/infra/database && sqlc generate
@@ -121,11 +121,11 @@ auth-down:
 	docker compose down auth-api auth-db
 
 auth-new-migrate:
-	docker compose run --rm migrator migrate new --dir file:///go/modules/auth/infra/database/migration
+	docker compose run --rm migrator migrate new --dir file:///go/modules/auth/src/infra/database/migrations
 
 auth-migrate:
-	docker compose run --rm migrator migrate hash --dir file:///go/modules/auth/infra/database/migration
-	docker compose run --rm migrator migrate apply --url postgres://auth:auth@auth-db:5432?sslmode=disable --dir file:///go/modules/auth/infra/database/migration
+	docker compose run --rm migrator migrate hash --dir file:///go/modules/auth/src/infra/database/migrations
+	docker compose run --rm migrator migrate apply --url postgres://auth:auth@auth-db:5432?sslmode=disable --dir file:///go/modules/auth/src/infra/database/migrations
 
 auth-sqlc-gen:
 	cd /workspace/main/modules/auth/src/infra/database && sqlc generate

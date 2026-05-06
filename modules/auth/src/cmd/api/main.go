@@ -2,9 +2,11 @@ package main
 
 import (
 	"auth/infra/cache"
+	"auth/infra/database"
 	"auth/route"
 	"auth/service"
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -67,17 +69,25 @@ func run() error {
 		return err
 	}
 
-	// ===== initialize resources =====
-	rds := cache.NewCache(e.cacheAddr, e.cachePrefix)
+	rds, err := cache.NewCache(e.cacheAddr, e.cachePrefix)
+	if err != nil {
+		return err
+	}
 
+	db, err := database.NewDB(e.dbUrl)
+	if err != nil {
+		return err
+	}
+
+	// ===== DI =====
 	h := route.NewHandler(service.NewLoginService())
 
+	// ===== start server =====
 	srv := &http.Server{
 		Addr:    ":8080",
 		Handler: h.Router(),
 	}
 
-	// ===== start server =====
 	go func() {
 		slog.Info("starting server on port 8080")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -92,12 +102,12 @@ func run() error {
 	<-ctx.Done()
 	slog.Info("shutdown signal received")
 
-	shutdown(srv, rds)
+	shutdown(srv, db, rds)
 
 	return nil
 }
 
-func shutdown(srv *http.Server, rds *redis.Client) {
+func shutdown(srv *http.Server, db *sql.DB, rds *redis.Client) {
 	slog.Info("shutdown signal received")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -112,6 +122,10 @@ func shutdown(srv *http.Server, rds *redis.Client) {
 	if err := rds.Close(); err != nil {
 		slog.Error("failed to close cache", "error", err)
 	}
+	if err := db.Close(); err != nil {
+		slog.Error("failed to close database", "error", err)
+	}
 
+	<-shutdownCtx.Done()
 	slog.Info("graceful shutdown completed")
 }
