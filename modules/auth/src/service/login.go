@@ -19,11 +19,11 @@ func NewLoginService(repo db.Querier) LoginService {
 func (s LoginService) Post(ctx context.Context, input domain.LoginInput) (*domain.Token, error) {
 	user, err := s.repo.GetUser(ctx, input.Email)
 	if err != nil {
-		return nil, utilhttp.NewDBError(fmt.Errorf("Failed to retrieve user from database: %v", err))
+		return nil, utilhttp.NewDBError(fmt.Errorf("failed to retrieve user from database: %v", err))
 	}
 
 	if user.Password != input.Password {
-		return nil, utilhttp.NewUnauthorizedError(fmt.Errorf("Invalid credentials"))
+		return nil, utilhttp.NewUnauthorizedError(fmt.Errorf("invalid credentials"))
 	}
 
 	return &domain.Token{}, nil
