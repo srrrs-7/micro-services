@@ -4,7 +4,7 @@ MODS := auth audit queue shared
 ###########################
 ## devcontainer commands ##
 ###########################
-.PHONY: test fmt tidy vet lint env rmi rmv prune
+.PHONY: test fmt tidy vet lint env update
 	
 test:
 	for mod in $(MODS); do \
@@ -46,14 +46,11 @@ env:
 		cd /workspace/main/modules/$$mod/src && go env; \
 	done
 
-rmi:
-	docker image ls | grep none | awk '{print $$3}' | xargs docker rmi
-
-rmv:
-	docker volume prune -f
-
-prune:
-	docker system prune -f
+update:
+	for mod in $(MODS); do \
+		echo "--- Updating dependencies for module: $$mod ---"; \
+		cd /workspace/main/modules/$$mod/src && go get -u ./... && go mod tidy; \
+	done
 
 ###############
 ## Git Hooks ##
