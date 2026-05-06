@@ -6,5 +6,5 @@ import (
 )
 
 type loginService interface {
-	Post(ctx context.Context, input domain.LoginInput) (domain.Token, error)
+	Post(ctx context.Context, input domain.LoginInput) (*domain.Token, error)
 }

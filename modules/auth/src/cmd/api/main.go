@@ -3,6 +3,7 @@ package main
 import (
 	"auth/infra/cache"
 	"auth/infra/database"
+	"auth/infra/database/db"
 	"auth/route"
 	"auth/service"
 	"context"
@@ -74,13 +75,13 @@ func run() error {
 		return err
 	}
 
-	db, err := database.NewDB(e.dbUrl)
+	connDB, err := database.NewDB(e.dbUrl)
 	if err != nil {
 		return err
 	}
 
 	// ===== DI =====
-	h := route.NewHandler(service.NewLoginService())
+	h := route.NewHandler(service.NewLoginService(db.New(connDB)))
 
 	// ===== start server =====
 	srv := &http.Server{
@@ -102,12 +103,12 @@ func run() error {
 	<-ctx.Done()
 	slog.Info("shutdown signal received")
 
-	shutdown(srv, db, rds)
+	shutdown(srv, connDB, rds)
 
 	return nil
 }
 
-func shutdown(srv *http.Server, db *sql.DB, rds *redis.Client) {
+func shutdown(srv *http.Server, connDB *sql.DB, rds *redis.Client) {
 	slog.Info("shutdown signal received")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -122,7 +123,7 @@ func shutdown(srv *http.Server, db *sql.DB, rds *redis.Client) {
 	if err := rds.Close(); err != nil {
 		slog.Error("failed to close cache", "error", err)
 	}
-	if err := db.Close(); err != nil {
+	if err := connDB.Close(); err != nil {
 		slog.Error("failed to close database", "error", err)
 	}
 

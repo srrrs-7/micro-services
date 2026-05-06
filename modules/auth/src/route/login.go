@@ -8,10 +8,10 @@ import (
 )
 
 type response struct {
-	Token domain.Token `json:"token"`
+	Token *domain.Token `json:"token"`
 }
 
-func newResponse(token domain.Token) response {
+func newResponse(token *domain.Token) response {
 	return response{Token: token}
 }
 
