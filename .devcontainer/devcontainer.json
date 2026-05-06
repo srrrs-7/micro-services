@@ -6,7 +6,9 @@
 // - Use setup.personal.sh for personal setup such as dotfiles
 {
   "name": "Go Microservices Dev Container",
-  "dockerComposeFile": ["compose.yaml"],
+  "dockerComposeFile": [
+    "compose.yaml"
+  ],
   "service": "dev",
   "workspaceFolder": "/workspace/main",
   "remoteUser": "vscode",
@@ -22,7 +24,9 @@
   },
   "customizations": {
     "vscode": {
-      "extensions": ["golang.go"],
+      "extensions": [
+        "golang.go"
+      ],
       "settings": {
         "editor.formatOnSave": true
       }

@@ -1,13 +1,4 @@
 services:
-  # util go container
-  gopher:
-    build:
-      dockerfile: ./.images/gopher/Dockerfile
-    container_name: gopher
-    working_dir: /go/src
-    volumes:
-      - .:/go/src
-
   migrator:
     build:
       dockerfile: ./.images/migrator/Dockerfile

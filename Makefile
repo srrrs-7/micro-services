@@ -4,10 +4,11 @@ MODS := auth audit queue shared
 ###########################
 ## devcontainer commands ##
 ###########################
-.PHONY: test tidy vet lint rmi rmv new-migrate
+.PHONY: test fmt tidy vet lint env rmi rmv prune
 	
 test:
 	for mod in $(MODS); do \
+		echo "--- Running tests for module: $$mod ---"; \
 		cd /workspace/main/modules/$$mod/src && go test -v -coverprofile=coverage.out -covermode=atomic ./...; \
 		cat coverage.out >> coverage.txt; \
 		rm coverage.out; \
@@ -15,22 +16,32 @@ test:
 
 fmt:
 	for mod in $(MODS); do \
+		echo "--- Formatting module: $$mod ---"; \
 		cd /workspace/main/modules/$$mod/src && go fmt ./...; \
 	done
 
 tidy:
 	for mod in $(MODS); do \
+		echo "--- Tidying module: $$mod ---"; \
 		cd /workspace/main/modules/$$mod/src && go mod tidy; \
 	done
 
 vet:
 	for mod in $(MODS); do \
+		echo "--- Running vet for module: $$mod ---"; \
 		cd /workspace/main/modules/$$mod/src && go vet ./...; \
 	done
 
 lint:
 	for mod in $(MODS); do \
+		echo "--- Running lint for module: $$mod ---"; \
 		cd /workspace/main/modules/$$mod/src && golangci-lint run ./...; \
+	done
+
+env:
+	for mod in $(MODS); do \
+		echo "--- Printing environment for module: $$mod ---"; \
+		cd /workspace/main/modules/$$mod/src && go env; \
 	done
 
 rmi:
@@ -39,9 +50,8 @@ rmi:
 rmv:
 	docker volume prune -f
 
-MODULE=auth
-new-migrate:
-	docker compose run --rm migrator migrate new --dir file:///go/modules/$(MODULE)/database/migration
+prune:
+	docker system prune -f
 
 ###############
 ## Git Hooks ##
@@ -71,9 +81,9 @@ hooks: hooks-install
 ###########
 ## audit ##
 ###########
-.PHONY: audit audit-up audit-build audit-down audit-migrate audit-grpc
+.PHONY: audit audit-up audit-build audit-down audit-migrate audit-sqlc-gen audit-grpc
 
-audit: audit-build audit-up
+audit: audit-build audit-up audit-migrate
 
 audit-up:
 	docker compose up -d audit-api audit-worker audit-db queue-api
@@ -84,20 +94,22 @@ audit-build:
 audit-down:
 	docker compose down audit-api audit-worker audit-db queue-api
 
-audit-migrate:
-	docker compose run --rm migrator migrate hash --dir file:///go/modules/audit/database/migration
-	docker compose run --rm migrator migrate apply --url postgres://audit:audit@audit-db:5432?sslmode=disable --dir file:///go/modules/audit/database/migration
+audit-new-migrate:
+	docker compose run --rm migrator migrate new --dir file:///go/modules/audit/infra/database/migration
 
-audit-grpc:
-	docker compose run --rm gopher protoc --proto_path=/go/src/driver/grpc/proto \
-		--go_out=. --go-grpc_out=. /go/src/driver/grpc/proto/queue.proto
+audit-migrate:
+	docker compose run --rm migrator migrate hash --dir file:///go/modules/audit/infra/database/migration
+	docker compose run --rm migrator migrate apply --url postgres://audit:audit@audit-db:5432?sslmode=disable --dir file:///go/modules/audit/infra/database/migration
+
+audit-sqlc-gen:
+	cd /workspace/main/modules/audit/src/infra/database && sqlc generate
 
 ##########
 ## auth ##
 ##########
-.PHONY: auth auth-up auth-build auth-down auth-migrate
+.PHONY: auth auth-up auth-build auth-down auth-migrate auth-sqlc-gen
 
-auth: auth-build auth-up
+auth: auth-build auth-up auth-migrate
 
 auth-up:
 	docker compose up -d auth-api auth-db
@@ -108,11 +120,12 @@ auth-build:
 auth-down:
 	docker compose down auth-api auth-db
 
+auth-new-migrate:
+	docker compose run --rm migrator migrate new --dir file:///go/modules/auth/infra/database/migration
+
 auth-migrate:
-	docker compose run --rm migrator migrate hash --dir file:///go/modules/auth/database/migration
-	docker compose run --rm migrator migrate apply --url postgres://auth:auth@auth-db:5432?sslmode=disable --dir file:///go/modules/auth/database/migration
+	docker compose run --rm migrator migrate hash --dir file:///go/modules/auth/infra/database/migration
+	docker compose run --rm migrator migrate apply --url postgres://auth:auth@auth-db:5432?sslmode=disable --dir file:///go/modules/auth/infra/database/migration
 
-auth-grpc:
-	docker compose run --rm gopher protoc --proto_path=/go/src/driver/grpc/proto \
-		--go_out=. --go-grpc_out=. /go/src/driver/grpc/proto/queue.proto
-
+auth-sqlc-gen:
+	cd /workspace/main/modules/auth/src/infra/database && sqlc generate

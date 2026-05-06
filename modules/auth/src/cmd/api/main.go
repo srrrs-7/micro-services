@@ -2,7 +2,6 @@ package main
 
 import (
 	"auth/infra/cache"
-	"auth/infra/db"
 	"auth/route"
 	"auth/service"
 	"context"
@@ -16,7 +15,6 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
 )
 
 const (
@@ -72,11 +70,6 @@ func run() error {
 	// ===== initialize resources =====
 	rds := cache.NewCache(e.cacheAddr, e.cachePrefix)
 
-	gormDB, err := db.NewDB(e.dbUrl)
-	if err != nil {
-		return err
-	}
-
 	h := route.NewHandler(service.NewLoginService())
 
 	srv := &http.Server{
@@ -99,12 +92,12 @@ func run() error {
 	<-ctx.Done()
 	slog.Info("shutdown signal received")
 
-	shutdown(srv, gormDB, rds)
+	shutdown(srv, rds)
 
 	return nil
 }
 
-func shutdown(srv *http.Server, gormDB *gorm.DB, rds *redis.Client) {
+func shutdown(srv *http.Server, rds *redis.Client) {
 	slog.Info("shutdown signal received")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -116,10 +109,6 @@ func shutdown(srv *http.Server, gormDB *gorm.DB, rds *redis.Client) {
 	}
 
 	// リソース解放（順序重要）
-	if err := db.CloseDB(gormDB); err != nil {
-		slog.Error("failed to close database", "error", err)
-	}
-
 	if err := rds.Close(); err != nil {
 		slog.Error("failed to close cache", "error", err)
 	}
