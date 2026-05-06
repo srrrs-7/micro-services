@@ -4,7 +4,7 @@ MODS := auth audit queue shared
 ###########################
 ## devcontainer commands ##
 ###########################
-.PHONY: test tidy vet rmi rmv new-migrate
+.PHONY: test tidy vet lint rmi rmv new-migrate
 	
 test:
 	for mod in $(MODS); do \

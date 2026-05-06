@@ -77,7 +77,7 @@ func run() error {
 		return err
 	}
 
-	h := route.NewHandler(service.LoginService{})
+	h := route.NewHandler(service.NewLoginService())
 
 	srv := &http.Server{
 		Addr:    ":8080",

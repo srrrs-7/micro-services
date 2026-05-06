@@ -27,7 +27,7 @@ func (h *handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.loginSvc.Post(req)
+	token, err := h.loginSvc.Post(r.Context(), domain.NewLoginInput(req.Email, req.Password))
 	if err != nil {
 		utilhttp.ResponseError(w, err)
 		return

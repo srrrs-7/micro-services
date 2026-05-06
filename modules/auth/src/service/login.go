@@ -2,11 +2,15 @@ package service
 
 import (
 	"auth/domain"
-	"auth/route/request"
+	"context"
 )
 
 type LoginService struct{}
 
-func (s LoginService) Post(req request.LoginRequest) (domain.Token, error) {
+func NewLoginService() LoginService {
+	return LoginService{}
+}
+
+func (s LoginService) Post(ctx context.Context, input domain.LoginInput) (domain.Token, error) {
 	return domain.Token{}, nil
 }

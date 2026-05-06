@@ -2,9 +2,9 @@ package route
 
 import (
 	"auth/domain"
-	"auth/route/request"
+	"context"
 )
 
 type loginService interface {
-	Post(req request.LoginRequest) (domain.Token, error)
+	Post(ctx context.Context, input domain.LoginInput) (domain.Token, error)
 }
