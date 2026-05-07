@@ -33,6 +33,8 @@ For every migration request:
    ```
    This runs `atlas migrate hash` (updates `atlas.sum`) then `atlas migrate apply` against `<service>-db`. If the DB container isn't running, start it first with `docker compose up -d <service>-db migrator`.
 
+   **Note (k8s):** the same migrations are also applied by a `<svc>-migrate` Job in `modules/<svc>/deploy/k8s/base/migrate-job.yaml` when running on the kind/k8s stack. The Job runs `migrate apply` only — `migrate hash` is NOT re-run there because the migrator image is read-only at runtime. Always run `make <service>-migrate` (which does `hash + apply`) at least once after editing migrations so the committed `atlas.sum` stays in sync; otherwise the k8s migrate Job will fail integrity checks. See `.claude/rules/kubernetes-conventions.md` §7.
+
 6. **If the migration changes a table that has sqlc queries**, regenerate:
    ```
    make <service>-sqlc-gen

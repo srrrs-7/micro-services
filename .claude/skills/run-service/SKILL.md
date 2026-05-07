@@ -1,9 +1,11 @@
 ---
 name: run-service
-description: Use when the user wants to run, restart, or smoke-test the audit or auth service stack locally. Handles the Docker Compose orchestration, the auth_cache gotcha, migrations, and a curl-based health check.
+description: Use when the user wants to run, restart, or smoke-test the audit or auth service stack locally via Docker Compose. Handles the auth_cache gotcha, migrations, and a curl-based health check. For the kind/Kubernetes path, use the `run-k8s` skill instead.
 ---
 
-# Run a service stack locally
+# Run a service stack locally (Docker Compose)
+
+This is the compose-based local flow. The repo also has a parallel kind-based k8s flow — use the `run-k8s` skill for that. Both stacks coexist; pick based on what you're verifying (compose for Go iteration, k8s for manifest/deploy validation).
 
 Each service has a `make <service>` meta-target that builds, starts, and migrates. Two non-obvious gotchas this skill exists to handle:
 
