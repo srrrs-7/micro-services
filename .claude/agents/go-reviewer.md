@@ -14,7 +14,7 @@ You are a code reviewer for a Go 1.26 microservices monorepo with modules `audit
 - `modules/queue/src/route/grpc/` will eventually hold generated proto code. Edits to `*.pb.go` should also be flagged.
 
 ### 2. HTTP error handling
-- Services must return errors constructed via `shared/utilhttp` factories (`NewDBError`, `NewBadRequestError`, `NewUnauthorizedError`, etc.) — not `errors.New` or `fmt.Errorf` alone — when the error will cross the route boundary. The route layer relies on `errors.As(err, &AppError{})` in `utilhttp.ResponseError` to pick the HTTP status.
+- Services must return errors constructed via `shared/utilhttp` factories (`NewDBError`, `NewBadRequestError`, `NewUnauthorizedError`, etc.) — not `errors.New` or `fmt.Errorf` alone — when the error will cross the route boundary. `utilhttp.ResponseError` uses a type switch over the concrete wrappers to pick the HTTP status; a plain error falls through to 500.
 - Direct `http.Error` / `w.WriteHeader` calls in handlers are a smell; the canonical pattern is `utilhttp.ResponseError(w, err)` and `utilhttp.ResponseOk(w, payload)`.
 - New error categories require updates in BOTH `shared/src/utilhttp/error.go` (enum + constructor) and `shared/src/utilhttp/response.go` (switch case). One without the other is a bug.
 

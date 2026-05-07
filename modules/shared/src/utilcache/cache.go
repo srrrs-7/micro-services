@@ -25,11 +25,11 @@ func NewCache(client *redis.Client, prefix string, ttl time.Duration) Cache {
 	return Cache{client: client, prefix: prefix, ttl: ttl}
 }
 
-func (c Cache) Set(ctx context.Context, key string, value interface{}) error {
+func (c Cache) Set(ctx context.Context, key string, value any) error {
 	return c.client.Set(ctx, c.makeKey(key), value, c.ttl).Err()
 }
 
-func (c Cache) Get(ctx context.Context, key string, dest interface{}) error {
+func (c Cache) Get(ctx context.Context, key string, dest any) error {
 	return c.client.Get(ctx, c.makeKey(key)).Scan(dest)
 }
 

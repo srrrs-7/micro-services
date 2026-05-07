@@ -1,7 +1,6 @@
 package utilhttp
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/goccy/go-json"
@@ -45,8 +44,29 @@ func ResponseAccepted[T any](w http.ResponseWriter, msg T) {
 }
 
 func ResponseError(w http.ResponseWriter, err error) {
+	// 各 typed wrapper は AppError を値埋め込みで保持しているだけで Unwrap を実装しないため、
+	// errors.As では取り出せない。明示的な type switch で AppError を取り出す。
 	var appErr AppError
-	if !errors.As(err, &appErr) {
+	switch e := err.(type) {
+	case AppError:
+		appErr = e
+	case NotFoundError:
+		appErr = e.AppError
+	case BadRequestError:
+		appErr = e.AppError
+	case InternalServerError:
+		appErr = e.AppError
+	case UnauthorizedError:
+		appErr = e.AppError
+	case ForbiddenError:
+		appErr = e.AppError
+	case ConflictError:
+		appErr = e.AppError
+	case TooManyRequestsError:
+		appErr = e.AppError
+	case DBError:
+		appErr = e.AppError
+	default:
 		responseInternalServerError(w, err)
 		return
 	}

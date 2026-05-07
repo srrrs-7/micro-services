@@ -1,4 +1,3 @@
-// request.go
 package utilhttp
 
 import (
@@ -9,9 +8,14 @@ import (
 	"net/http"
 )
 
-type contextKey string
+// ContextKey is the typed key used by SetContextValue / RequestUrlParam to
+// avoid collisions with bare-string keys in context.WithValue. Each consumer
+// declares its own constants of this type:
+//
+//	const userIDKey utilhttp.ContextKey = "userID"
+type ContextKey string
 
-func SetContextValue(ctx context.Context, key contextKey, val any) context.Context {
+func SetContextValue(ctx context.Context, key ContextKey, val any) context.Context {
 	return context.WithValue(ctx, key, val)
 }
 
@@ -19,7 +23,7 @@ type Validator interface {
 	Validate() error
 }
 
-func RequestUrlParam[T Validator](req *http.Request, key contextKey) (T, error) {
+func RequestUrlParam[T Validator](req *http.Request, key ContextKey) (T, error) {
 	var zero T
 
 	t, ok := req.Context().Value(key).(T)

@@ -45,7 +45,8 @@ This codebase has a **specific, non-standard** error idiom. Read this section ca
 
 The codebase uses `fmt.Errorf("context: %v", err)` — value formatting, NOT `%w`. Therefore:
 - Do **NOT** use `errors.Is` / `errors.As` for unwrapping internal errors.
-- The only `errors.As` in the codebase is `utilhttp.ResponseError` extracting `AppError` from a typed wrapper, which works because `AppError` is embedded by value, not unwrapped via `%w`.
+- `utilhttp.ResponseError` discriminates on the concrete typed wrapper via a type switch (`case BadRequestError:`, `case DBError:`, …), not via `errors.As`. The wrappers embed `AppError` by value and do not implement `Unwrap`, so `errors.As` would not extract them.
+- The only sanctioned `errors.As` in the codebase is in tests, asserting that an error is exactly the concrete wrapper type (e.g. `errors.As(err, &utilhttp.DBError{})`). It works there because the target and dynamic types are identical, not because of unwrapping.
 - Comparing sentinel errors uses `==`: `if err != http.ErrServerClosed` (`auth/cmd/api/main.go:94`), not `errors.Is`.
 
 If you introduce `%w` wrapping, you change the contract — discuss before doing so.

@@ -106,7 +106,7 @@ if dbErr.Type != utilhttp.ErrDatabase {
 }
 ```
 
-Note: this is the **only** sanctioned use of `errors.As` in this codebase, and it works because the target (`*utilhttp.DBError`) and the err's dynamic type (`utilhttp.DBError`) are identical — not because of any unwrapping. Do not use `errors.As(err, &utilhttp.AppError{})` to extract the embedded base struct: `BadRequestError`, `DBError`, etc. embed `AppError` by value rather than implementing `Unwrap`, and Go's `reflect.AssignableTo` does not bridge embedding (see the `KNOWN_ISSUE` test in `route/login_test.go`).
+Note: this is the **only** sanctioned use of `errors.As` in this codebase, and it works because the target (`*utilhttp.DBError`) and the err's dynamic type (`utilhttp.DBError`) are identical — not because of any unwrapping. Do not use `errors.As(err, &utilhttp.AppError{})` to extract the embedded base struct: `BadRequestError`, `DBError`, etc. embed `AppError` by value rather than implementing `Unwrap`, and Go's `reflect.AssignableTo` does not bridge embedding. (`utilhttp.ResponseError` itself reaches `AppError` via an explicit type switch over each wrapper for the same reason.)
 
 ## 4. HTTP handler tests
 
@@ -132,9 +132,9 @@ Reference: `modules/auth/src/route/login_test.go` shows the success-path test (d
 
 ### 4.1 Pinning a known issue
 
-When a test exposes a real bug in production code that you are not authorizing to fix in the same change, name the test with a `_KNOWN_ISSUE` suffix and assert on the *current* (incorrect) behavior, with a comment naming what the test should assert once the bug is fixed. Example: `TestHandler_login_returnsServerErrorForMalformedBody_KNOWN_ISSUE` in `route/login_test.go` pins the current 500 response, with a note that the expected status becomes 400 once `utilhttp.ResponseError`'s `errors.As` extraction is corrected.
+When a test exposes a real bug in production code that you are not authorizing to fix in the same change, name the test with a `_KNOWN_ISSUE` suffix and assert on the *current* (incorrect) behavior, with a comment naming what the test should assert once the bug is fixed.
 
-Pinning is preferable to skipping (`t.Skip`) because it locks the regression in place — a future "fix" that doesn't actually fix breaks the test loudly.
+Pinning is preferable to skipping (`t.Skip`) because it locks the regression in place — a future "fix" that doesn't actually fix breaks the test loudly. When the bug is fixed, the same change must drop the `_KNOWN_ISSUE` suffix and flip the assertion to the correct value.
 
 ### 4.2 Receiver-method gotcha for chi handlers
 

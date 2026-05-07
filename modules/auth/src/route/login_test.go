@@ -80,16 +80,7 @@ func TestHandler_login_returns200WithTokenForValidRequest(t *testing.T) {
 	}
 }
 
-// Pins a known issue in shared/utilhttp.ResponseError: it extracts the
-// typed wrapper via `errors.As(err, &AppError{})`, but BadRequestError /
-// DBError / etc. embed AppError by value rather than implementing Unwrap,
-// so Go's reflect.AssignableTo does not bridge the gap. As a result every
-// service-returned error currently falls through to 500.
-//
-// When ResponseError is fixed (e.g. by switching on the concrete wrapper
-// types or adding Unwrap to AppError), this test will fail and the
-// expected status should be updated to http.StatusBadRequest.
-func TestHandler_login_returnsServerErrorForMalformedBody_KNOWN_ISSUE(t *testing.T) {
+func TestHandler_login_returnsBadRequestForMalformedBody(t *testing.T) {
 	svc := stubLoginService{
 		post: func(context.Context, domain.LoginInput) (*domain.Token, error) {
 			t.Error("service should not be invoked when body decode fails")
@@ -104,9 +95,8 @@ func TestHandler_login_returnsServerErrorForMalformedBody_KNOWN_ISSUE(t *testing
 	h := NewHandler(svc)
 	h.Router().ServeHTTP(rec, req)
 
-	if got, want := rec.Code, http.StatusInternalServerError; got != want {
-		t.Errorf("status = %d, want %d (after ResponseError fix, this should be %d)",
-			got, want, http.StatusBadRequest)
+	if got, want := rec.Code, http.StatusBadRequest; got != want {
+		t.Errorf("status = %d, want %d", got, want)
 	}
 
 	var errResp utilhttp.ErrorResponse
