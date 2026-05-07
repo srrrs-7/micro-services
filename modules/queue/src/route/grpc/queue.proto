@@ -1,43 +1,81 @@
 syntax = "proto3";
 
-package Queue;
+package queue.v1;
 
-option go_package = "./modules/queue/routers/grpc";
+option go_package = "queue/route/grpc;grpc";
 
-// The request message for the Enqueue service
-message EnqueueRequest {
-    string prompt = 1;
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+
+// Queue は queue サービスの全 RPC を集約する単一サービス。
+// MVP 下地段階では CreateTopic / Publish / Consume / Ack のみを定義し、
+// それ以外 (DeleteTopic, Subscription 系, Nack, ExtendLease, Stats) は
+// docs/system-design.md §6 に従い後続 Phase で追加する。
+service Queue {
+  // ===== Admin =====
+  rpc CreateTopic (CreateTopicRequest) returns (Topic);
+
+  // ===== Producer =====
+  rpc Publish (PublishRequest) returns (PublishResponse);
+
+  // ===== Consumer =====
+  rpc Consume (ConsumeRequest) returns (ConsumeResponse);
+  rpc Ack     (AckRequest)     returns (google.protobuf.Empty);
 }
 
-message EnqueueResponse {
-    string message = 1;
+message Topic {
+  string                    name         = 1;
+  google.protobuf.Duration  default_ttl  = 2;
+  uint32                    max_priority = 3; // 0..9
+  google.protobuf.Timestamp created_at   = 4;
 }
 
-service EnqueueService {
-    rpc Enqueue (EnqueueRequest) returns (EnqueueResponse);
+message CreateTopicRequest {
+  string                   name         = 1;
+  google.protobuf.Duration default_ttl  = 2; // 未指定なら 7d
+  uint32                   max_priority = 3; // 未指定なら 9
 }
 
-message DequeueRequest {
+message PublishRequest {
+  string                    topic         = 1;
+  bytes                     payload       = 2;
+  uint32                    priority      = 3; // 0..max_priority
+  string                    partition_key = 4; // 空文字 = 順序なし
+  map<string, string>       headers       = 5;
+  google.protobuf.Timestamp available_at  = 6; // 未指定 = 即配信可
+  google.protobuf.Timestamp expires_at    = 7; // 未指定 = topic.default_ttl 適用
 }
 
-// The request message for the Enqueue service
-message DequeueResponse {
-    string prompt = 1;
+message PublishResponse {
+  uint64 message_id = 1;
 }
 
-service DequeueService {
-    rpc Dequeue (DequeueRequest) returns (DequeueResponse);
+message ConsumeRequest {
+  string                   topic        = 1;
+  string                   subscription = 2;
+  uint32                   max_messages = 3; // 1..100, 既定 16
+  google.protobuf.Duration max_wait     = 4; // 0..60s, 既定 0 (即時返却)
+  string                   consumer_id  = 5; // 任意ラベル (slog / 監査用)
 }
 
-// The request message for the QueueStatus service
-message QueueStatusRequest {
-    string queue_id = 1;
+message LeasedMessage {
+  string                    lease_id      = 1; // ack/nack/extend に使う opaque ID
+  uint64                    message_id    = 2;
+  bytes                     payload       = 3;
+  uint32                    priority      = 4;
+  string                    partition_key = 5;
+  map<string, string>       headers       = 6;
+  string                    producer_id   = 7;
+  uint32                    attempt       = 8; // 1-origin
+  google.protobuf.Timestamp enqueued_at   = 9;
+  google.protobuf.Timestamp leased_until  = 10;
 }
 
-message QueueStatusResponse {
-    string status = 1;
+message ConsumeResponse {
+  repeated LeasedMessage messages = 1;
 }
 
-service QueueStatusService {
-    rpc GetQueueStatus (QueueStatusRequest) returns (QueueStatusResponse);
+message AckRequest {
+  string lease_id = 1;
 }

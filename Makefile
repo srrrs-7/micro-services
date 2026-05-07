@@ -227,3 +227,18 @@ $(SERVICES:%=%-migrate): %-migrate:
 
 $(SERVICES:%=%-sqlc-gen): %-sqlc-gen:
 	cd modules/$*/src/infra/database && sqlc generate
+
+##@ Queue gRPC
+
+# protoc include path matches the devcontainer Dockerfile install location.
+PROTOC_INCLUDE := $(HOME)/.local/protoc/include
+
+.PHONY: queue-proto-gen
+queue-proto-gen: ## Generate Go from queue.proto via protoc (requires devcontainer tools)
+	cd modules/queue/src && \
+	protoc \
+	    --proto_path=$(PROTOC_INCLUDE) \
+	    --proto_path=. \
+	    --go_out=. --go_opt=paths=source_relative \
+	    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+	    route/grpc/queue.proto

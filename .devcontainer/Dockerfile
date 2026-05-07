@@ -35,3 +35,15 @@ RUN curl -sSfL https://golangci-lint.run/install.sh  | sh -s -- -b ~/.local/bin
 
 # go orm sqlc installation
 RUN curl -L "$(curl -s https://api.github.com/repos/sqlc-dev/sqlc/releases/latest | grep "browser_download_url.*$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | cut -d '"' -f 4)" | tar xz -C ~/.local/bin
+
+# protoc + Go plugins (queue gRPC). Versions pinned; bump together when upgrading.
+ARG PROTOC_VERSION=28.3
+ARG PROTOC_GEN_GO_VERSION=v1.34.2
+ARG PROTOC_GEN_GO_GRPC_VERSION=v1.5.1
+RUN ARCH=$(uname -m | sed 's/x86_64/x86_64/;s/aarch64/aarch_64/') \
+    && curl -fsSLo /tmp/protoc.zip "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-${ARCH}.zip" \
+    && unzip -oq /tmp/protoc.zip -d ~/.local/protoc \
+    && ln -sf ~/.local/protoc/bin/protoc ~/.local/bin/protoc \
+    && rm /tmp/protoc.zip
+RUN GOBIN=$HOME/.local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION} \
+    && GOBIN=$HOME/.local/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}
