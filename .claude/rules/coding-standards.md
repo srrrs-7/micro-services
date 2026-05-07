@@ -36,6 +36,7 @@ Reference: `modules/auth/src/` is the most complete example. `audit/` is structu
 - Group order (gofmt + goimports auto-handles this): stdlib, then a single blank line, then third-party + local. See `modules/auth/src/cmd/api/main.go:3-21`.
 - Local imports use the module name as root: `auth/domain`, `auth/route/request`, `shared/utilhttp`. Never use full repo paths.
 - Cross-service imports (`audit` → `auth`, etc.) are forbidden. Use `shared/...` for common code; service-to-service contracts go via gRPC.
+- **Exception — gRPC contract surface.** `<svc>/src/route/grpc/` (the `.proto` plus protoc-generated `*.pb.go` / `*_grpc.pb.go`) is the wire-level contract and IS importable cross-service. Confine the cross-import to a single `<consumer>/src/infra/<svc>client/` wrapper (canonical example: `audit/src/infra/queueclient/client.go`) so the rest of the consumer module references the producer's types only via that wrapper. The wrapper re-exports request/response types as `type X = <svc>grpc.X` aliases and re-exports `utilgrpc.Option` so callers do not import `shared/utilgrpc` or `google.golang.org/grpc` directly.
 
 ## 3. Error handling
 

@@ -6,12 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A Go workspace (`modules/go.work`, Go 1.26.0) containing four modules under `modules/`:
 
-- `audit/src` — audit service, split into `cmd/api` and `cmd/worker` entry points
+- `audit/src` — audit service exposing a gRPC API (proto: `modules/audit/src/route/grpc/audit.proto`), split into `cmd/api` and `cmd/worker` entry points
 - `auth/src` — auth service (HTTP API only), backed by Postgres + Redis cache
 - `queue/src` — queue service exposing a gRPC API (proto: `modules/queue/src/route/grpc/queue.proto`)
-- `shared/src` — cross-service helpers: `utilhttp` (typed `AppError` + JSON request/response helpers), `utillog` (slog JSON logger), and `utilcache` (Redis client + prefixed Cache wrapper)
+- `shared/src` — cross-service helpers: `utilhttp` (typed `AppError` + JSON request/response helpers), `utillog` (slog JSON logger), `utilcache` (Redis client + prefixed `Cache` wrapper), and `utilgrpc` (gRPC `Dial` with functional options for TLS / interceptors + an outbound logging interceptor). Service-specific gRPC client wrappers do NOT live here — see the gRPC consumer pattern below.
 
-Each service module follows the same internal layout: `cmd/<binary>/main.go` wires env → infra → service → route, while the layers live under `domain/` (entities, inputs), `service/` (business logic over `db.Querier`), `infra/database/` (sqlc + migrations), and `route/` (chi HTTP router; gRPC for queue). Cache access (Redis) is provided by `shared/utilcache` and consumed directly from `cmd/<binary>/main.go` — no per-service `infra/cache/` directory.
+Each service module follows the same internal layout: `cmd/<binary>/main.go` wires env → infra → service → route, while the layers live under `domain/` (entities, inputs), `service/` (business logic over `db.Querier`), `infra/database/` (sqlc + migrations), and `route/` (chi HTTP router for `auth`; gRPC `server.go` + `handler.go` + `interceptor/` for `audit` / `queue`). Cache access (Redis) is provided by `shared/utilcache` and consumed directly from `cmd/<binary>/main.go` — no per-service `infra/cache/` directory.
 
 Service-to-service calls go over an internal Docker bridge network (`compose.yml`). When working on `audit`, `make audit` also brings up `queue-api` because the audit worker is expected to consume from it.
 
@@ -23,6 +23,7 @@ The following tools are required and are pre-installed in the devcontainer (`.de
 - **Atlas** runs migrations via the `migrator` container (see `.images/migrator/Dockerfile`). The `*-migrate` targets first run `migrate hash` (updates `atlas.sum`) and then `migrate apply` against the service DB.
 - **golangci-lint** v2 config in `.golangci.yml`. Linters are grouped by intent: error handling (`errcheck` with `check-type-assertions` + `check-blank`, `errchkjson`, `nilerr`), resource handling (`bodyclose`, `rowserrcheck`, `sqlclosecheck`, `noctx`), exhaustiveness (`exhaustive` over `switch` + `map`), static analysis (`govet`, `staticcheck`, `unused`, `ineffassign`), and quality (`misspell` US, `gocritic`, `dupl`, `predeclared`, `nolintlint`, `gocheckcompilerdirectives`). Formatters: `gofmt` + `goimports`. `errcheck` / `errchkjson` / `dupl` are relaxed in `*_test.go` and `testutil/`; `noctx` is relaxed in `*_test.go`; `w.Write` is excluded globally. CI runs `make lint` and `make test` (`.github/workflows/ci-cd.yml`).
 - **kubectl + kind** for the local Kubernetes setup (see "Kubernetes deployment" below). The dev container shares the host Docker socket via `.devcontainer/compose.yaml`, so `kind` runs its node containers on the host's daemon.
+- **protoc 28.3 + protoc-gen-go v1.34.2 + protoc-gen-go-grpc v1.5.1** generate the gRPC stubs (`*.pb.go`, `*_grpc.pb.go`) under each service's `route/grpc/`. Regenerate with `make queue-proto-gen` / `make audit-proto-gen` (or `make proto-gen` for both). Bumping versions also requires editing `.devcontainer/Dockerfile` and `Makefile`'s `PROTOC_INCLUDE`.
 
 ## Common Commands
 
@@ -45,6 +46,10 @@ cd modules/<service>/src && go test -run TestName ./path/to/pkg
 - `make auth` ≡ `auth-build` + `auth-up` + `auth-migrate`. Brings up `auth-api`, `auth-db`, `migrator` (note: the auth API depends on the `auth_cache` Redis service in `compose.yml`, but `auth-up` does not start it — start it explicitly with `docker compose up -d auth_cache` if running auth-api locally).
 - Postgres ports: audit `5432`, auth `5433`. Redis: `6379`. API containers expose `8080` internally.
 
+### gRPC code generation
+- `make queue-proto-gen` / `make audit-proto-gen` regenerate one service's `*.pb.go` + `*_grpc.pb.go` from the `.proto` next to them.
+- `make proto-gen` runs both at once.
+
 ### Migrations
 - New migration: `make audit-new-migrate` or `make auth-new-migrate` (NOT `make new-migrate MODULE=...`). These shell into the `migrator` container and call `atlas migrate new`.
 - Apply: `make audit-migrate` / `make auth-migrate`.
@@ -65,7 +70,9 @@ cd modules/<service>/src && go test -run TestName ./path/to/pkg
 - **Errors across HTTP**: services return typed errors from `shared/utilhttp` (e.g. `NewDBError`, `NewUnauthorizedError`). The route layer calls `utilhttp.ResponseError(w, err)` which type-switches on `AppError.Type` to the right HTTP status. Add new error categories by extending `ErrorType` and the switch in both `error.go` and `response.go`.
 - **Request decoding**: `utilhttp.RequestBody[T]` and `RequestUrlParam[T]` require `T` to implement `Validate() error` (the `Validator` interface). New request types under `route/request/` must satisfy this.
 - **Logging**: call `utillog.NewLogger()` once in `init()` to install a JSON `slog` handler at debug level, then use `slog` directly.
-- **Generated code**: `infra/database/db/*.go` (sqlc output) and the unimplemented gRPC stubs under `modules/queue/src/route/grpc/` are generated — modify the source (`.sql` queries, `.proto`) and regenerate.
+- **gRPC consumer pattern**: each consumer module that needs to call another service over gRPC owns a `<consumer>/src/infra/<svc>client/` wrapper (canonical example: `audit/src/infra/queueclient/`). The wrapper is the **only** place inside that consumer that may import `<producer>/route/grpc` cross-service — every other package in the consumer references producer types via the wrapper's type aliases. The wrapper also re-exports `utilgrpc.Option` so callers don't reach for `shared/utilgrpc` or `google.golang.org/grpc`. When proto adds a new message that the consumer must name, add a matching `type X = <svc>grpc.X` alias in the wrapper. See `coding-standards.md` §2 for the contract-surface exemption that makes the cross-service import legal.
+- **gRPC error handling**: handlers return `status.Error(codes.X, msg)` from `google.golang.org/grpc/status` — `utilhttp.AppError` is HTTP-only and does not apply. The recovery interceptor (`route/interceptor/recovery.go`) converts panics to `codes.Internal` so the outer logging interceptor sees a meaningful code on the access log line.
+- **Generated code**: `infra/database/db/*.go` (sqlc output) and gRPC stubs under `modules/{audit,queue}/src/route/grpc/` (`*.pb.go`, `*_grpc.pb.go`) are generated — modify the source (`.sql` queries, `.proto`) and regenerate. The `shared/<svc>client/` wrappers are hand-written but follow a strict pattern: connection lifecycle + type aliases re-exporting proto types.
 
 ## Kubernetes deployment
 
