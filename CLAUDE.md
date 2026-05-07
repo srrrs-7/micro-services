@@ -23,7 +23,7 @@ The following tools are required and are pre-installed in the devcontainer (`.de
 - **Atlas** runs migrations via the `migrator` container (see `.images/migrator/Dockerfile`). The `*-migrate` targets first run `migrate hash` (updates `atlas.sum`) and then `migrate apply` against the service DB.
 - **golangci-lint** v2 config in `.golangci.yml`. Linters are grouped by intent: error handling (`errcheck` with `check-type-assertions` + `check-blank`, `errchkjson`, `nilerr`), resource handling (`bodyclose`, `rowserrcheck`, `sqlclosecheck`, `noctx`), exhaustiveness (`exhaustive` over `switch` + `map`), static analysis (`govet`, `staticcheck`, `unused`, `ineffassign`), and quality (`misspell` US, `gocritic`, `dupl`, `predeclared`, `nolintlint`, `gocheckcompilerdirectives`). Formatters: `gofmt` + `goimports`. `errcheck` / `errchkjson` / `dupl` are relaxed in `*_test.go` and `testutil/`; `noctx` is relaxed in `*_test.go`; `w.Write` is excluded globally. CI runs `make lint` and `make test` (`.github/workflows/ci-cd.yml`).
 - **kubectl + kind** for the local Kubernetes setup (see "Kubernetes deployment" below). The dev container shares the host Docker socket via `.devcontainer/compose.yaml`, so `kind` runs its node containers on the host's daemon.
-- **protoc 28.3 + protoc-gen-go v1.34.2 + protoc-gen-go-grpc v1.5.1** generate the gRPC stubs (`*.pb.go`, `*_grpc.pb.go`) under each service's `route/grpc/`. Regenerate with `make queue-proto-gen` / `make audit-proto-gen` (or `make proto-gen` for both). Bumping versions also requires editing `.devcontainer/Dockerfile` and `Makefile`'s `PROTOC_INCLUDE`.
+- **protoc 28.3 + protoc-gen-go v1.34.2 + protoc-gen-go-grpc v1.5.1** generate the gRPC stubs (`*.pb.go`, `*_grpc.pb.go`) under each service's `route/grpc/`. Regenerate with `make queue-proto-gen` / `make audit-proto-gen`. Bumping versions also requires editing `.devcontainer/Dockerfile` and `Makefile`'s `PROTOC_INCLUDE`.
 
 ## Common Commands
 
@@ -48,7 +48,6 @@ cd modules/<service>/src && go test -run TestName ./path/to/pkg
 
 ### gRPC code generation
 - `make queue-proto-gen` / `make audit-proto-gen` regenerate one service's `*.pb.go` + `*_grpc.pb.go` from the `.proto` next to them.
-- `make proto-gen` runs both at once.
 
 ### Migrations
 - New migration: `make audit-new-migrate` or `make auth-new-migrate` (NOT `make new-migrate MODULE=...`). These shell into the `migrator` container and call `atlas migrate new`.
