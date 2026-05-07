@@ -37,6 +37,7 @@
           "build.directoryFilters": [
             "-modules/auth/src/infra/database/db",
             "-modules/audit/src/infra/database/db",
+            "-modules/audit/src/route/grpc",
             "-modules/queue/src/route/grpc"
           ],
           "ui.semanticTokens": true,

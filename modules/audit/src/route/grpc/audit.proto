@@ -1,0 +1,110 @@
+syntax = "proto3";
+
+package audit.v1;
+
+option go_package = "audit/route/grpc;grpc";
+
+import "google/protobuf/timestamp.proto";
+
+// Audit は audit サービスの全 RPC を集約する単一サービス。
+// MVP 下地段階では Ingest / GetEvent / ListEvents のみを定義し、
+// 残り (Phase 1.5 の Integrity verify など) は docs/system-design.md §13
+// に従い後続 Phase で追加する。
+service Audit {
+  // ===== Ingest =====
+  // 同期取り込み。event_id で冪等。重複再送は AlreadyExists ではなく
+  // 通常成功 (recorded_at は初回値) として扱う — design-doc §7.2。
+  rpc Ingest (IngestRequest) returns (IngestResponse);
+
+  // ===== Query =====
+  rpc GetEvent   (GetEventRequest)   returns (Event);
+  rpc ListEvents (ListEventsRequest) returns (ListEventsResponse);
+}
+
+// Event は監査イベント本体。design-doc §6.1 の JSON 表現を 5W1H に沿って
+// ネストメッセージで再現する。recorded_at はサーバ付与のため、Ingest 時の
+// リクエストでは無視される (応答にのみ含まれる)。
+message Event {
+  string                    event_id       = 1;
+  google.protobuf.Timestamp occurred_at    = 2;
+  google.protobuf.Timestamp recorded_at    = 3;
+  uint32                    schema_version = 4;
+
+  Actor actor = 10;
+  What  what  = 11;
+  Where where = 12;
+  Why   why   = 13;
+  How   how   = 14;
+
+  // details JSONB を canonical な JSON バイト列で運ぶ (32 KB 上限)。
+  // 構造を proto で表現しないのは details のキーが任意で発展するため。
+  // 検証 (blocklist) はサーバ側で json.Unmarshal してから行う。
+  bytes details = 20;
+}
+
+message Actor {
+  string type       = 1; // user | service | system | anonymous
+  string id         = 2;
+  string ip         = 3;
+  string user_agent = 4;
+}
+
+message What {
+  string action        = 1; // <domain>.<resource>.<verb>
+  string resource_type = 2;
+  string resource_id   = 3;
+}
+
+message Where {
+  string service     = 1;
+  string environment = 2;
+  string region      = 3;
+  string host        = 4;
+}
+
+message Why {
+  string reason     = 1;
+  string request_id = 2;
+  string trace_id   = 3;
+  string span_id    = 4;
+}
+
+message How {
+  string method   = 1; // HTTP | gRPC | CLI | JOB | SYSTEM
+  string outcome  = 2; // success | failure | denied
+  string severity = 3; // debug | info | notice | warning | error | critical
+  string source   = 4;
+}
+
+message IngestRequest {
+  Event event = 1;
+}
+
+message IngestResponse {
+  string                    event_id    = 1;
+  google.protobuf.Timestamp recorded_at = 2;
+}
+
+message GetEventRequest {
+  string event_id = 1;
+}
+
+// ListEventsRequest は keyset cursor pagination 用。design-doc §7.3。
+// from/to は省略可だが、サーバ側で省略時は 24h 以内のデフォルトを当てる。
+message ListEventsRequest {
+  google.protobuf.Timestamp from_time     = 1;
+  google.protobuf.Timestamp to_time       = 2;
+  string                    actor_type    = 3;
+  string                    actor_id      = 4;
+  string                    resource_type = 5;
+  string                    resource_id   = 6;
+  string                    action        = 7;
+  string                    outcome       = 8;
+  uint32                    limit         = 9;  // 1..1000, 既定 100
+  string                    cursor        = 10; // base64({occurred_at,id})
+}
+
+message ListEventsResponse {
+  repeated Event events      = 1;
+  string         next_cursor = 2;
+}

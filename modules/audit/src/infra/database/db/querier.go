@@ -6,10 +6,22 @@ package db
 
 import (
 	"context"
+
+	"github.com/google/uuid"
 )
 
 type Querier interface {
-	GetUser(ctx context.Context, email string) (User, error)
+	GetEventByEventID(ctx context.Context, eventID uuid.UUID) (AuditEvent, error)
+	// Idempotent insert. Returns the new row on first write; ON CONFLICT skips
+	// the row but RETURNING then yields zero results, so callers detect the
+	// duplicate by checking for sql.ErrNoRows and follow up with GetEventByEventID
+	// to read the existing recorded_at (design-doc §7.2).
+	InsertEvent(ctx context.Context, arg InsertEventParams) (InsertEventRow, error)
+	// Phase 1.0 listing — keyset cursor pagination over (occurred_at DESC, id DESC).
+	// Filters beyond from/to are applied in code for now; the indexes in
+	// migrations/20260507075754_audit_events.sql cover actor/resource/action/request
+	// so adding them here later is a query-only change.
+	ListEventsByTimeRange(ctx context.Context, arg ListEventsByTimeRangeParams) ([]AuditEvent, error)
 }
 
 var _ Querier = (*Queries)(nil)

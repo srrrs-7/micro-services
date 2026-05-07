@@ -7,27 +7,231 @@ package db
 
 import (
 	"context"
+	"database/sql"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 )
 
-const getUser = `-- name: GetUser :one
+const getEventByEventID = `-- name: GetEventByEventID :one
 SELECT
-    id, login_id, password, email, created_at, updated_at
+    id, event_id, occurred_at, recorded_at, schema_version, actor_type, actor_id, actor_ip, actor_user_agent, action, resource_type, resource_id, service, environment, region, host, reason, request_id, trace_id, span_id, method, outcome, severity, source, details, prev_hash, hash
 FROM
-    users
+    audit_events
 WHERE
-    email = $1
+    event_id = $1
 `
 
-func (q *Queries) GetUser(ctx context.Context, email string) (User, error) {
-	row := q.db.QueryRowContext(ctx, getUser, email)
-	var i User
+func (q *Queries) GetEventByEventID(ctx context.Context, eventID uuid.UUID) (AuditEvent, error) {
+	row := q.db.QueryRowContext(ctx, getEventByEventID, eventID)
+	var i AuditEvent
 	err := row.Scan(
 		&i.ID,
-		&i.LoginID,
-		&i.Password,
-		&i.Email,
-		&i.CreatedAt,
-		&i.UpdatedAt,
+		&i.EventID,
+		&i.OccurredAt,
+		&i.RecordedAt,
+		&i.SchemaVersion,
+		&i.ActorType,
+		&i.ActorID,
+		&i.ActorIp,
+		&i.ActorUserAgent,
+		&i.Action,
+		&i.ResourceType,
+		&i.ResourceID,
+		&i.Service,
+		&i.Environment,
+		&i.Region,
+		&i.Host,
+		&i.Reason,
+		&i.RequestID,
+		&i.TraceID,
+		&i.SpanID,
+		&i.Method,
+		&i.Outcome,
+		&i.Severity,
+		&i.Source,
+		&i.Details,
+		&i.PrevHash,
+		&i.Hash,
 	)
 	return i, err
+}
+
+const insertEvent = `-- name: InsertEvent :one
+INSERT INTO audit_events (
+    event_id,
+    occurred_at,
+    schema_version,
+    actor_type,
+    actor_id,
+    actor_ip,
+    actor_user_agent,
+    action,
+    resource_type,
+    resource_id,
+    service,
+    environment,
+    region,
+    host,
+    reason,
+    request_id,
+    trace_id,
+    span_id,
+    method,
+    outcome,
+    severity,
+    source,
+    details
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+    $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+    $21, $22, $23
+)
+ON CONFLICT (event_id) DO NOTHING
+RETURNING
+    id,
+    event_id,
+    recorded_at
+`
+
+type InsertEventParams struct {
+	EventID        uuid.UUID             `json:"event_id"`
+	OccurredAt     time.Time             `json:"occurred_at"`
+	SchemaVersion  int16                 `json:"schema_version"`
+	ActorType      string                `json:"actor_type"`
+	ActorID        string                `json:"actor_id"`
+	ActorIp        pqtype.Inet           `json:"actor_ip"`
+	ActorUserAgent sql.NullString        `json:"actor_user_agent"`
+	Action         string                `json:"action"`
+	ResourceType   string                `json:"resource_type"`
+	ResourceID     sql.NullString        `json:"resource_id"`
+	Service        string                `json:"service"`
+	Environment    string                `json:"environment"`
+	Region         sql.NullString        `json:"region"`
+	Host           sql.NullString        `json:"host"`
+	Reason         sql.NullString        `json:"reason"`
+	RequestID      sql.NullString        `json:"request_id"`
+	TraceID        sql.NullString        `json:"trace_id"`
+	SpanID         sql.NullString        `json:"span_id"`
+	Method         string                `json:"method"`
+	Outcome        string                `json:"outcome"`
+	Severity       string                `json:"severity"`
+	Source         string                `json:"source"`
+	Details        pqtype.NullRawMessage `json:"details"`
+}
+
+type InsertEventRow struct {
+	ID         int64     `json:"id"`
+	EventID    uuid.UUID `json:"event_id"`
+	RecordedAt time.Time `json:"recorded_at"`
+}
+
+// Idempotent insert. Returns the new row on first write; ON CONFLICT skips
+// the row but RETURNING then yields zero results, so callers detect the
+// duplicate by checking for sql.ErrNoRows and follow up with GetEventByEventID
+// to read the existing recorded_at (design-doc §7.2).
+func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) (InsertEventRow, error) {
+	row := q.db.QueryRowContext(ctx, insertEvent,
+		arg.EventID,
+		arg.OccurredAt,
+		arg.SchemaVersion,
+		arg.ActorType,
+		arg.ActorID,
+		arg.ActorIp,
+		arg.ActorUserAgent,
+		arg.Action,
+		arg.ResourceType,
+		arg.ResourceID,
+		arg.Service,
+		arg.Environment,
+		arg.Region,
+		arg.Host,
+		arg.Reason,
+		arg.RequestID,
+		arg.TraceID,
+		arg.SpanID,
+		arg.Method,
+		arg.Outcome,
+		arg.Severity,
+		arg.Source,
+		arg.Details,
+	)
+	var i InsertEventRow
+	err := row.Scan(&i.ID, &i.EventID, &i.RecordedAt)
+	return i, err
+}
+
+const listEventsByTimeRange = `-- name: ListEventsByTimeRange :many
+SELECT
+    id, event_id, occurred_at, recorded_at, schema_version, actor_type, actor_id, actor_ip, actor_user_agent, action, resource_type, resource_id, service, environment, region, host, reason, request_id, trace_id, span_id, method, outcome, severity, source, details, prev_hash, hash
+FROM
+    audit_events
+WHERE
+    occurred_at BETWEEN $1 AND $2
+ORDER BY
+    occurred_at DESC,
+    id DESC
+LIMIT $3
+`
+
+type ListEventsByTimeRangeParams struct {
+	OccurredAt   time.Time `json:"occurred_at"`
+	OccurredAt_2 time.Time `json:"occurred_at_2"`
+	Limit        int32     `json:"limit"`
+}
+
+// Phase 1.0 listing — keyset cursor pagination over (occurred_at DESC, id DESC).
+// Filters beyond from/to are applied in code for now; the indexes in
+// migrations/20260507075754_audit_events.sql cover actor/resource/action/request
+// so adding them here later is a query-only change.
+func (q *Queries) ListEventsByTimeRange(ctx context.Context, arg ListEventsByTimeRangeParams) ([]AuditEvent, error) {
+	rows, err := q.db.QueryContext(ctx, listEventsByTimeRange, arg.OccurredAt, arg.OccurredAt_2, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditEvent
+	for rows.Next() {
+		var i AuditEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventID,
+			&i.OccurredAt,
+			&i.RecordedAt,
+			&i.SchemaVersion,
+			&i.ActorType,
+			&i.ActorID,
+			&i.ActorIp,
+			&i.ActorUserAgent,
+			&i.Action,
+			&i.ResourceType,
+			&i.ResourceID,
+			&i.Service,
+			&i.Environment,
+			&i.Region,
+			&i.Host,
+			&i.Reason,
+			&i.RequestID,
+			&i.TraceID,
+			&i.SpanID,
+			&i.Method,
+			&i.Outcome,
+			&i.Severity,
+			&i.Source,
+			&i.Details,
+			&i.PrevHash,
+			&i.Hash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

@@ -6,68 +6,66 @@ package db
 
 import (
 	"database/sql"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/sqlc-dev/pqtype"
 )
 
-// Users table for storing basic user information
-type User struct {
-	// Primary key for user identification
-	ID int32 `json:"id"`
-	// Unique login identifier
-	LoginID string `json:"login_id"`
-	// Hashed password
-	Password string `json:"password"`
-	// User email address (unique)
-	Email string `json:"email"`
-	// Record creation timestamp
-	CreatedAt sql.NullTime `json:"created_at"`
-	// Record last update timestamp
-	UpdatedAt sql.NullTime `json:"updated_at"`
-}
-
-// User roles junction table - manages many-to-many relationship between users and roles
-type UserRole struct {
-	// User ID (composite primary key)
-	UserID int32 `json:"user_id"`
-	// Role ID (foreign key)
-	RoleID int32 `json:"role_id"`
-	// Record creation timestamp
-	CreatedAt sql.NullTime `json:"created_at"`
-	// Record last update timestamp
-	UpdatedAt sql.NullTime `json:"updated_at"`
-}
-
-// User role types table - defines available system roles
-type UserRoleType struct {
-	// Primary key for role identification
-	ID int32 `json:"id"`
-	// Role name (admin, user, etc.)
-	Role string `json:"role"`
-	// Record creation timestamp
-	CreatedAt sql.NullTime `json:"created_at"`
-	// Record last update timestamp
-	UpdatedAt sql.NullTime `json:"updated_at"`
-}
-
-// User scopes junction table - manages many-to-many relationship between users and scopes
-type UserScope struct {
-	// User ID (composite primary key)
-	UserID int32 `json:"user_id"`
-	// Scope ID (foreign key)
-	ScopeID int32 `json:"scope_id"`
-	// Record creation timestamp
-	CreatedAt sql.NullTime `json:"created_at"`
-	// Record last update timestamp
-	UpdatedAt sql.NullTime `json:"updated_at"`
-}
-
-// User scope types table - defines available permission scopes in the system
-type UserScopeType struct {
-	// Primary key for scope identification
-	ID int32 `json:"id"`
-	// Scope name (read, write, etc.)
-	Scope string `json:"scope"`
-	// Record creation timestamp
-	CreatedAt sql.NullTime `json:"created_at"`
-	// Record last update timestamp
-	UpdatedAt sql.NullTime `json:"updated_at"`
+// 5W1H audit event store (append-only). See docs/system-design.md §5.
+type AuditEvent struct {
+	// Internal monotonic id; orders rows for the Phase 1.5 hash chain.
+	ID int64 `json:"id"`
+	// External idempotency key (UUID v4 / v7).
+	EventID uuid.UUID `json:"event_id"`
+	// When the event happened (client-supplied, server-skew validated).
+	OccurredAt time.Time `json:"occurred_at"`
+	// When this row was persisted (server clock).
+	RecordedAt time.Time `json:"recorded_at"`
+	// Row schema version for forward-compatible reads.
+	SchemaVersion int16 `json:"schema_version"`
+	// Who: user | service | system | anonymous.
+	ActorType string `json:"actor_type"`
+	// Who: user_id / client_id / "system" / "-" (anonymous).
+	ActorID string `json:"actor_id"`
+	// Who: source IP if available.
+	ActorIp pqtype.Inet `json:"actor_ip"`
+	// Who: User-Agent header (HTTP only).
+	ActorUserAgent sql.NullString `json:"actor_user_agent"`
+	// What: <domain>.<resource>.<verb> (lower-snake.dot, past tense).
+	Action string `json:"action"`
+	// What: target resource kind.
+	ResourceType string `json:"resource_type"`
+	// What: target resource id (NULL for set-level operations).
+	ResourceID sql.NullString `json:"resource_id"`
+	// Where: producer service (auth | audit | queue | ...).
+	Service string `json:"service"`
+	// Where: dev | staging | prod.
+	Environment string `json:"environment"`
+	// Where: cloud region tag.
+	Region sql.NullString `json:"region"`
+	// Where: hostname / pod name.
+	Host sql.NullString `json:"host"`
+	// Why: business context (free text, sanitized client-side).
+	Reason sql.NullString `json:"reason"`
+	// Why: same-request correlation id.
+	RequestID sql.NullString `json:"request_id"`
+	// Why: W3C trace-context trace id (32 hex chars).
+	TraceID sql.NullString `json:"trace_id"`
+	// Why: W3C trace-context span id (16 hex chars).
+	SpanID sql.NullString `json:"span_id"`
+	// How: HTTP | gRPC | CLI | JOB | SYSTEM.
+	Method string `json:"method"`
+	// How: success | failure | denied.
+	Outcome string `json:"outcome"`
+	// How: debug | info | notice | warning | error | critical (RFC 5424).
+	Severity string `json:"severity"`
+	// How: producer component (api | worker | ...).
+	Source string `json:"source"`
+	// Structured extra information (PII blocklist enforced; 32 KB cap).
+	Details pqtype.NullRawMessage `json:"details"`
+	// SHA-256 of the previous row (Phase 1.5 hash chain).
+	PrevHash sql.NullString `json:"prev_hash"`
+	// SHA-256 of canonical_json(this row || prev_hash) (Phase 1.5 hash chain).
+	Hash sql.NullString `json:"hash"`
 }
