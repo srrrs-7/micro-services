@@ -131,6 +131,25 @@ rmi: ## Prune dangling Docker images
 rmv: ## Prune dangling Docker volumes
 	docker volume prune -f
 
+##@ Devcontainer (run from the HOST shell, NOT inside the container)
+
+# Typical rebuild flow after editing .devcontainer/Dockerfile:
+#   1. close the editor's devcontainer session (Zed window)
+#   2. make devcontainer-down
+#   3. make devcontainer-rebuild   (or devcontainer-build if cache is fine)
+#   4. reopen the project in the editor
+DEVCONTAINER_COMPOSE := .devcontainer/compose.yaml
+
+.PHONY: devcontainer-build devcontainer-rebuild devcontainer-down
+devcontainer-build: ## Build the devcontainer image (cache-aware)
+	docker compose -f $(DEVCONTAINER_COMPOSE) build
+
+devcontainer-rebuild: ## Full rebuild of the devcontainer image (--no-cache)
+	docker compose -f $(DEVCONTAINER_COMPOSE) build --no-cache
+
+devcontainer-down: ## Stop and remove the devcontainer (preserves bind-mounted source)
+	docker compose -f $(DEVCONTAINER_COMPOSE) down
+
 ##@ Kubernetes (kind)
 
 # image-name:dockerfile-path. Built and loaded together by k8s-build / k8s-load.
