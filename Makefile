@@ -142,13 +142,13 @@ DEVCONTAINER_COMPOSE := .devcontainer/compose.yaml
 
 .PHONY: devcontainer-build devcontainer-rebuild devcontainer-down
 devcontainer-build: ## Build the devcontainer image (cache-aware)
-	docker compose -f $(DEVCONTAINER_COMPOSE) build
+	docker-compose -f $(DEVCONTAINER_COMPOSE) build
 
 devcontainer-rebuild: ## Full rebuild of the devcontainer image (--no-cache)
-	docker compose -f $(DEVCONTAINER_COMPOSE) build --no-cache
+	docker-compose -f $(DEVCONTAINER_COMPOSE) build --no-cache
 
 devcontainer-down: ## Stop and remove the devcontainer (preserves bind-mounted source)
-	docker compose -f $(DEVCONTAINER_COMPOSE) down
+	docker-compose -f $(DEVCONTAINER_COMPOSE) down
 
 ##@ Kubernetes (kind)
 
@@ -247,12 +247,12 @@ $(SERVICES:%=%-migrate): %-migrate:
 $(SERVICES:%=%-sqlc-gen): %-sqlc-gen:
 	cd modules/$*/src/infra/database && sqlc generate
 
-##@ Queue gRPC
+##@ gRPC
 
 # protoc include path matches the devcontainer Dockerfile install location.
 PROTOC_INCLUDE := $(HOME)/.local/protoc/include
 
-.PHONY: queue-proto-gen
+.PHONY: queue-proto-gen audit-proto-gen
 queue-proto-gen: ## Generate Go from queue.proto via protoc (requires devcontainer tools)
 	cd modules/queue/src && \
 	protoc \
@@ -261,3 +261,12 @@ queue-proto-gen: ## Generate Go from queue.proto via protoc (requires devcontain
 	    --go_out=. --go_opt=paths=source_relative \
 	    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
 	    route/grpc/queue.proto
+
+audit-proto-gen: ## Generate Go from audit.proto via protoc (requires devcontainer tools)
+	cd modules/audit/src && \
+	protoc \
+	    --proto_path=$(PROTOC_INCLUDE) \
+	    --proto_path=. \
+	    --go_out=. --go_opt=paths=source_relative \
+	    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+	    route/grpc/audit.proto
