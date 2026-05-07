@@ -41,6 +41,56 @@ Prerequisites in the devcontainer (added via `.devcontainer/devcontainer.json`):
 - `kubectl`
 - `kind`
 
+### First-time setup: Docker socket permission
+
+The devcontainer mounts the host's `/var/run/docker.sock`, but its GID is host-defined and won't match any group baked into the image. `.devcontainer/setup.sh` (run on container creation via `postCreateCommand`) detects the socket's GID, creates a `docker-host` group with that GID, and adds `vscode` to it.
+
+If `make k8s-up` fails with `permission denied while trying to connect to the docker API at unix:///var/run/docker.sock`:
+
+1. Check the user is actually in the group:
+   ```bash
+   id vscode | grep docker-host
+   ```
+   If missing, re-run setup: `sudo .devcontainer/setup.sh`.
+
+2. Even when `id` shows the group, an existing shell still uses the group set it was exec'd with. Pick one:
+   ```bash
+   exec newgrp docker-host        # re-exec the current shell
+   ```
+   or close and reopen the VS Code terminal, or "Developer: Reload Window".
+
+3. Verify before re-running `make k8s-up`:
+   ```bash
+   groups | tr ' ' '\n' | grep docker-host
+   docker info --format '{{.ServerVersion}}'
+   ```
+
+### First-time setup: kubectl reaching the kind API server
+
+`kind` runs its node containers on the host docker daemon (since we share `docker.sock`), so its default kubeconfig points at `127.0.0.1:<published-port>` on the **host**. From inside the devcontainer that loopback is a different network namespace and the API server is unreachable, manifesting as:
+
+```
+error validating "deploy/k8s/dev": failed to download openapi:
+  Get "https://127.0.0.1:NNNNN/openapi/v2?timeout=32s": dial tcp 127.0.0.1:NNNNN: connect: connection refused
+```
+
+`make k8s-cluster` (and therefore `make k8s-up`) handles this via the `k8s-kubeconfig` sub-target:
+
+1. Attaches this container to the `kind` docker network (`docker network connect kind <self>`).
+2. Rewrites `~/.kube/config` from `kind get kubeconfig --name dev --internal`, which sets `server: https://dev-control-plane:6443` (resolved via docker DNS on the `kind` network).
+
+Both steps are idempotent and only run when `/.dockerenv` (or a container cgroup) is detected, so the same Makefile is safe outside a container.
+
+If you delete the cluster with `make k8s-cluster-delete`, the network is recreated next time and the kubeconfig is regenerated; nothing manual is required.
+
+If you've manually edited `~/.kube/config` and `make k8s-up` is now refusing to reach the API server, run:
+
+```bash
+make k8s-kubeconfig
+```
+
+to restore the in-container-friendly config.
+
 ## Image build & load
 
 `make k8s-build` builds these `:dev` images locally:

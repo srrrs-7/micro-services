@@ -142,10 +142,23 @@ K8S_IMAGES     := audit-api:.images/audit/api.Dockerfile \
                   migrator:.images/migrator/Dockerfile
 K8S_NAMESPACES := audit auth queue
 
-.PHONY: k8s-cluster k8s-build k8s-load k8s-apply k8s-up k8s-status k8s-down k8s-cluster-delete
+.PHONY: k8s-cluster k8s-kubeconfig k8s-build k8s-load k8s-apply k8s-up k8s-status k8s-down k8s-cluster-delete
 
 k8s-cluster: ## Create the kind cluster (idempotent)
 	@kind get clusters 2>/dev/null | grep -qx $(K8S_CLUSTER) || kind create cluster --name $(K8S_CLUSTER)
+	@$(MAKE) -s k8s-kubeconfig
+
+k8s-kubeconfig: ## Wire kubeconfig + network so kubectl works from inside the devcontainer (idempotent)
+	@# When running inside a container that shares the host docker socket, kind writes a
+	@# kubeconfig pointing at 127.0.0.1:<port> on the *host*, which is unreachable from
+	@# here. Attach this container to the kind docker network and switch to the
+	@# --internal kubeconfig (server=https://$(K8S_CLUSTER)-control-plane:6443) instead.
+	@if [ -f /.dockerenv ] || grep -qE '/(docker|containerd|kubepods)' /proc/1/cgroup 2>/dev/null; then \
+		this=$$(cat /etc/hostname); \
+		docker network connect kind $$this 2>/dev/null || true; \
+		mkdir -p $$HOME/.kube; \
+		kind get kubeconfig --name $(K8S_CLUSTER) --internal > $$HOME/.kube/config; \
+	fi
 
 k8s-build: ## Build all service images locally with :dev tag
 	@for entry in $(K8S_IMAGES); do \
