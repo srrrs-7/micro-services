@@ -193,9 +193,23 @@ Edit the source (`queries/*.sql`, `migrations/*.sql`, `*.proto`) and regenerate.
 
 ## 15. Linting
 
-Pre-commit hook runs `make fmt && make vet && make lint`. The lint config (`.golangci.yml`) enables `errcheck` (with type-assertion checks), `govet`, `staticcheck`, `unused`, `ineffassign`, `misspell` (US locale), `exhaustive`, `gocritic`, `dupl`. Two project-specific implications:
+Pre-commit hook runs `make fmt && make vet && make lint`; pre-push hook runs `make test`. CI re-runs `make lint` and `make test` (`.github/workflows/ci-cd.yml`). The lint config (`.golangci.yml`) groups linters by intent:
 
-- **`exhaustive`**: any `switch` over a defined enum (`ErrorType`, future role enums, etc.) must cover every constant or have a `default`.
+- **Error handling (must)**: `errcheck` (with `check-type-assertions: true` and `check-blank: true`), `errchkjson`, `nilerr`.
+- **Resource handling (must)**: `bodyclose`, `rowserrcheck`, `sqlclosecheck`, `noctx`.
+- **Exhaustiveness (must)**: `exhaustive` over both `switch` and `map` literals; `default-signifies-exhaustive: true`.
+- **Static analysis**: `govet`, `staticcheck`, `unused`, `ineffassign`.
+- **Quality**: `misspell` (US), `gocritic`, `dupl`, `predeclared`, `nolintlint`, `gocheckcompilerdirectives`.
+- **Formatters** (run via `golangci-lint fmt`/`run`): `gofmt`, `goimports`.
+
+Project-specific implications:
+
+- **`exhaustive`**: any `switch` (or map literal) over a defined enum (`ErrorType`, future role enums) must cover every constant or have a `default`.
 - **`errcheck check-type-assertions: true`**: `x.(T)` without comma-ok is a lint error. Always write `x, ok := y.(T)`.
+- **`errcheck check-blank: true`**: `_ = f()` for an error-returning `f` is a lint error. Either handle the error or document why blanking is correct via a `//nolint:errcheck // <reason>` directive (which `nolintlint` will validate).
+- **`noctx`**: HTTP requests and `db.Ping`/`db.Exec` must use the `*Context` variants. Tests using `httptest.NewRequest` are exempted by path.
+- **`nolintlint`**: every `//nolint:foo` must name the linter and include `// <explanation>`.
+
+`errcheck`, `errchkjson`, and `dupl` are relaxed in `*_test.go` and `testutil/`. `noctx` is relaxed in `*_test.go`. `(*http.ResponseWriter).Write` is excluded from `errcheck` globally — there is nothing to do if the response write fails.
 
 When a lint exception is genuinely needed, prefer narrowing the rule in `.golangci.yml` (path-based) over `//nolint` directives in code.

@@ -6,40 +6,65 @@ run:
 
 linters:
   enable:
-    - errcheck       # エラーハンドリング漏れ検出
-    - govet          # go vet
-    - staticcheck    # 高度な静的解析 (gosimple含む)
-    - unused         # 未使用コード検出
-    - ineffassign    # 無効な代入検出
-    - misspell       # スペルミス検出
-    - exhaustive     # switch文の網羅性チェック
-    - gocritic       # コード品質向上のための多様なチェック
-    - dupl           # 重複コード検出
+    # --- error handling (must) ---
+    - errcheck                    # unchecked errors (incl. type assertions)
+    - errchkjson                  # unchecked encoding/json marshal/unmarshal errors
+    - nilerr                      # `return nil` after a non-nil err check
+    # --- resource handling (must) ---
+    - bodyclose                   # missing http.Response.Body.Close()
+    - rowserrcheck                # missing sql.Rows.Err() after iteration
+    - sqlclosecheck               # unclosed sql.Rows / sql.Stmt
+    - noctx                       # http requests without a context
+    # --- exhaustiveness (must) ---
+    - exhaustive                  # non-exhaustive switch/map over enums
+    # --- static analysis ---
+    - govet
+    - staticcheck                 # incl. former gosimple
+    - unused
+    - ineffassign
+    # --- code quality ---
+    - misspell
+    - gocritic
+    - dupl
+    - predeclared                 # shadowing of predeclared identifiers
+    - nolintlint                  # malformed //nolint directives
+    - gocheckcompilerdirectives   # malformed //go: directives
+
+  settings:
+    errcheck:
+      check-type-assertions: true   # x.(T) without comma-ok is an error
+      check-blank: true             # `_ = f()` for error-returning f is an error
+      exclude-functions:
+        - (net/http.ResponseWriter).Write
+    exhaustive:
+      check:
+        - switch
+        - map
+      default-signifies-exhaustive: true
+    misspell:
+      locale: US
+    nolintlint:
+      require-explanation: true     # //nolint:foo // <reason> is required
+      require-specific: true        # //nolint must name the linter(s)
+      allow-unused: false
+
   exclusions:
-    # std-error-handling プリセット: 標準的なエラーハンドリングの除外
     presets:
       - std-error-handling
     rules:
-      # テストファイルでは errcheck を緩和
-      - path: '(.+)_test\.go'
+      # Tests intentionally ignore many returns and may have helpful duplication.
+      - path: '_test\.go'
         linters:
           - errcheck
-      # testutil パッケージでは errcheck を緩和
+          - errchkjson
+          - dupl
+          - noctx        # httptest.NewRequest is fine in tests
       - path: 'testutil/'
         linters:
           - errcheck
-      # HTTP ResponseWriter.Write (書き込み失敗時に対処方法がない)
-      - text: 'Error return value of `w\.Write` is not checked'
-        linters:
-          - errcheck
+          - errchkjson
 
 formatters:
   enable:
-    - gofmt          # フォーマットチェック
-    - goimports      # import文の整理チェック
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-  misspell:
-    locale: US
+    - gofmt
+    - goimports

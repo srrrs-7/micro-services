@@ -21,7 +21,7 @@ Three code-gen / migration tools are required and are pre-installed in the devco
 
 - **sqlc** generates the `infra/database/db/` package from `migrations/*.sql` (schema) + `queries/*.sql` (queries). Regenerate with `make audit-sqlc-gen` / `make auth-sqlc-gen`. Do not edit files in `infra/database/db/` by hand — they are regenerated.
 - **Atlas** runs migrations via the `migrator` container (see `.images/migrator/Dockerfile`). The `*-migrate` targets first run `migrate hash` (updates `atlas.sum`) and then `migrate apply` against the service DB.
-- **golangci-lint** v2 config in `.golangci.yml`: enables `errcheck` (with type-assertion checks), `govet`, `staticcheck`, `unused`, `ineffassign`, `misspell` (US), `exhaustive`, `gocritic`, `dupl`; formatters `gofmt` + `goimports`. `errcheck` is relaxed in `*_test.go`, `testutil/`, and for `w.Write`.
+- **golangci-lint** v2 config in `.golangci.yml`. Linters are grouped by intent: error handling (`errcheck` with `check-type-assertions` + `check-blank`, `errchkjson`, `nilerr`), resource handling (`bodyclose`, `rowserrcheck`, `sqlclosecheck`, `noctx`), exhaustiveness (`exhaustive` over `switch` + `map`), static analysis (`govet`, `staticcheck`, `unused`, `ineffassign`), and quality (`misspell` US, `gocritic`, `dupl`, `predeclared`, `nolintlint`, `gocheckcompilerdirectives`). Formatters: `gofmt` + `goimports`. `errcheck` / `errchkjson` / `dupl` are relaxed in `*_test.go` and `testutil/`; `noctx` is relaxed in `*_test.go`; `w.Write` is excluded globally. CI runs `make lint` and `make test` (`.github/workflows/ci-cd.yml`).
 
 ## Common Commands
 

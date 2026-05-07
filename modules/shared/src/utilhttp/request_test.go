@@ -185,7 +185,7 @@ func TestContextKey_typedKeysDoNotCollideWithBareString(t *testing.T) {
 	}
 }
 
-// Defence-in-depth: a fresh request from httptest.NewRequest exposes a
+// Defense-in-depth: a fresh request from httptest.NewRequest exposes a
 // non-nil Body even for nil readers, so RequestBody should still execute
 // the read path. This test guards against regression if the std lib changes.
 func TestRequestBody_emptyBodyDecodesToZeroValue(t *testing.T) {
