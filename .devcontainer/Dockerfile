@@ -36,6 +36,16 @@ RUN curl -sSfL https://golangci-lint.run/install.sh  | sh -s -- -b ~/.local/bin
 # go orm sqlc installation
 RUN curl -L "$(curl -s https://api.github.com/repos/sqlc-dev/sqlc/releases/latest | grep "browser_download_url.*$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | cut -d '"' -f 4)" | tar xz -C ~/.local/bin
 
+# Go toolchain. Pinned to match modules/go.work and devcontainer.json's go feature.
+# Required because devcontainer Features are not applied by `docker compose build`,
+# so the protoc-plugin step below would otherwise fail with `go: not found`.
+ARG GO_VERSION=1.26.0
+RUN ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
+    && curl -fsSLo /tmp/go.tar.gz "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" \
+    && tar -C "$HOME/.local" -xzf /tmp/go.tar.gz \
+    && rm /tmp/go.tar.gz
+ENV PATH="/home/vscode/.local/go/bin:/home/vscode/.local/bin:${PATH}"
+
 # protoc + Go plugins (queue gRPC). Versions pinned; bump together when upgrading.
 ARG PROTOC_VERSION=28.3
 ARG PROTOC_GEN_GO_VERSION=v1.34.2
