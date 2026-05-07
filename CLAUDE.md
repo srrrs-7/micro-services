@@ -80,3 +80,11 @@ The following files contain the full coding standards, testing policy, and k8s c
 @.claude/rules/coding-standards.md
 @.claude/rules/testing.md
 @.claude/rules/kubernetes-conventions.md
+
+## Per-service design docs
+
+Each service has an MVP-level system design doc that future changes should align with. Read the relevant one before non-trivial work in that module:
+
+- `modules/auth/docs/system-design.md` — OAuth 2.0 / OIDC AS
+- `modules/audit/docs/system-design.md` — 5W1H audit trail
+- `modules/queue/docs/system-design.md` — priority queue + audit contract

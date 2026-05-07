@@ -7,7 +7,12 @@ metadata:
     app.kubernetes.io/component: api
     app.kubernetes.io/managed-by: kustomize
 spec:
-  replicas: 1
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: audit
@@ -19,6 +24,17 @@ spec:
         app.kubernetes.io/component: api
         app.kubernetes.io/managed-by: kustomize
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: audit
+                    app.kubernetes.io/component: api
+      terminationGracePeriodSeconds: 30
       containers:
         - name: api
           image: audit-api
@@ -31,6 +47,22 @@ spec:
                 name: audit-api-config
             - secretRef:
                 name: audit-api-secret
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]
           resources:
             requests:
               cpu: 50m

@@ -6,5 +6,6 @@ resources:
   - configmap.yaml
   - api-deployment.yaml
   - api-service.yaml
+  - api-pdb.yaml
   - migrate-job.yaml
   - networkpolicy.yaml
