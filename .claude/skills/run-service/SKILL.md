@@ -7,7 +7,7 @@ description: Use when the user wants to run, restart, or smoke-test the audit or
 
 Each service has a `make <service>` meta-target that builds, starts, and migrates. Two non-obvious gotchas this skill exists to handle:
 
-1. `make auth-up` does NOT start `auth_cache` even though `auth-api` depends on it via `compose.yml`. The auth API will fail its `cache.Ping` and exit on startup if Redis isn't running.
+1. `make auth-up` does NOT start `auth_cache` even though `auth-api` depends on it via `compose.yml`. The auth API will fail its `utilcache.NewClient` Ping and exit on startup if Redis isn't running.
 2. `make audit-migrate` and `make auth-migrate` require the corresponding `*-db` container to be healthy first — the `migrate apply` step connects directly.
 
 ## Auth service

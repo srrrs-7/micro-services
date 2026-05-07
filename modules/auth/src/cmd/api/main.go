@@ -1,7 +1,6 @@
 package main
 
 import (
-	"auth/infra/cache"
 	"auth/infra/database"
 	"auth/infra/database/db"
 	"auth/route"
@@ -13,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"shared/utilcache"
 	"shared/utillog"
 	"syscall"
 	"time"
@@ -70,7 +70,7 @@ func run() error {
 		return err
 	}
 
-	rds, err := cache.NewCache(e.cacheAddr, e.cachePrefix)
+	rds, err := utilcache.NewClient(e.cacheAddr, e.cachePrefix)
 	if err != nil {
 		return err
 	}

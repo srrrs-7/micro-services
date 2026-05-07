@@ -9,9 +9,9 @@ A Go workspace (`modules/go.work`, Go 1.26.0) containing four modules under `mod
 - `audit/src` — audit service, split into `cmd/api` and `cmd/worker` entry points
 - `auth/src` — auth service (HTTP API only), backed by Postgres + Redis cache
 - `queue/src` — queue service exposing a gRPC API (proto: `modules/queue/src/route/grpc/queue.proto`)
-- `shared/src` — cross-service helpers: `utilhttp` (typed `AppError` + JSON request/response helpers) and `utillog` (slog JSON logger)
+- `shared/src` — cross-service helpers: `utilhttp` (typed `AppError` + JSON request/response helpers), `utillog` (slog JSON logger), and `utilcache` (Redis client + prefixed Cache wrapper)
 
-Each service module follows the same internal layout: `cmd/<binary>/main.go` wires env → infra → service → route, while the layers live under `domain/` (entities, inputs), `service/` (business logic over `db.Querier`), `infra/database/` (sqlc + migrations), `infra/cache/` (auth only), and `route/` (chi HTTP router; gRPC for queue).
+Each service module follows the same internal layout: `cmd/<binary>/main.go` wires env → infra → service → route, while the layers live under `domain/` (entities, inputs), `service/` (business logic over `db.Querier`), `infra/database/` (sqlc + migrations), and `route/` (chi HTTP router; gRPC for queue). Cache access (Redis) is provided by `shared/utilcache` and consumed directly from `cmd/<binary>/main.go` — no per-service `infra/cache/` directory.
 
 Service-to-service calls go over an internal Docker bridge network (`compose.yml`). When working on `audit`, `make audit` also brings up `queue-api` because the audit worker is expected to consume from it.
 

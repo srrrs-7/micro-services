@@ -1,4 +1,4 @@
-package cache
+package utilcache
 
 import (
 	"context"
@@ -8,10 +8,21 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// Cache is a prefixed key-value store backed by Redis with a uniform TTL.
+// Keys are stored as "<prefix>-<key>" so multiple services can share a
+// Redis instance without colliding.
 type Cache struct {
 	client *redis.Client
 	prefix string
 	ttl    time.Duration
+}
+
+// NewCache wraps an existing *redis.Client with a key prefix and TTL.
+// Construct the client via NewClient first; this allows the caller to
+// share one client across multiple Cache instances with different
+// prefixes/TTLs (e.g. session cache vs. rate-limit cache).
+func NewCache(client *redis.Client, prefix string, ttl time.Duration) Cache {
+	return Cache{client: client, prefix: prefix, ttl: ttl}
 }
 
 func (c Cache) Set(ctx context.Context, key string, value interface{}) error {

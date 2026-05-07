@@ -19,14 +19,15 @@ modules/<service>/src/
 │   ├── request/<feature>.go     # request structs with Validate()
 │   └── middleware/              # chi middleware
 └── infra/
-    ├── database/
-    │   ├── database.go          # *sql.DB constructor
-    │   ├── migrations/*.sql     # Atlas-managed
-    │   ├── queries/*.sql        # sqlc input
-    │   ├── sqlc.yaml
-    │   └── db/                  # GENERATED — never hand-edit
-    └── cache/                   # Redis adapter (auth only)
+    └── database/
+        ├── database.go          # *sql.DB constructor
+        ├── migrations/*.sql     # Atlas-managed
+        ├── queries/*.sql        # sqlc input
+        ├── sqlc.yaml
+        └── db/                  # GENERATED — never hand-edit
 ```
+
+Redis is consumed from `shared/utilcache` directly in `cmd/<binary>/main.go` — there is intentionally no per-service `infra/cache/` directory.
 
 Reference: `modules/auth/src/` is the most complete example. `audit/` is structurally similar but mostly stub.
 
