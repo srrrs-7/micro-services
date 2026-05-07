@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: auth-migrate
+  labels:
+    app.kubernetes.io/name: auth
+    app.kubernetes.io/component: migrate
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  backoffLimit: 10
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: auth
+        app.kubernetes.io/component: migrate
+        app.kubernetes.io/managed-by: kustomize
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: atlas
+          image: migrator
+          imagePullPolicy: IfNotPresent
+          args:
+            - migrate
+            - apply
+            - --url
+            - $(DB_URL)
+            - --dir
+            - file:///go/modules/auth/src/infra/database/migrations
+          envFrom:
+            - secretRef:
+                name: auth-api-secret
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

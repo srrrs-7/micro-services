@@ -5,4 +5,6 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ..:/workspace/main:cached
+      # Share host docker socket so `docker` and `kind` work inside the dev container.
+      - /var/run/docker.sock:/var/run/docker.sock
     command: sleep infinity

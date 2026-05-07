@@ -131,6 +131,61 @@ rmi: ## Prune dangling Docker images
 rmv: ## Prune dangling Docker volumes
 	docker volume prune -f
 
+##@ Kubernetes (kind)
+
+# image-name:dockerfile-path. Built and loaded together by k8s-build / k8s-load.
+K8S_CLUSTER    := dev
+K8S_IMAGES     := audit-api:.images/audit/api.Dockerfile \
+                  audit-worker:.images/audit/worker.Dockerfile \
+                  auth-api:.images/auth/api.Dockerfile \
+                  queue-api:.images/queue/Dockerfile \
+                  migrator:.images/migrator/Dockerfile
+K8S_NAMESPACES := audit auth queue
+
+.PHONY: k8s-cluster k8s-build k8s-load k8s-apply k8s-up k8s-status k8s-down k8s-cluster-delete
+
+k8s-cluster: ## Create the kind cluster (idempotent)
+	@kind get clusters 2>/dev/null | grep -qx $(K8S_CLUSTER) || kind create cluster --name $(K8S_CLUSTER)
+
+k8s-build: ## Build all service images locally with :dev tag
+	@for entry in $(K8S_IMAGES); do \
+		image=$${entry%%:*}; dockerfile=$${entry#*:}; \
+		echo "--- Building $$image:dev from $$dockerfile ---"; \
+		docker build -t $$image:dev -f $$dockerfile . || exit $$?; \
+	done
+
+k8s-load: k8s-cluster ## Load :dev images into the kind cluster
+	@for entry in $(K8S_IMAGES); do \
+		image=$${entry%%:*}; \
+		echo "--- Loading $$image:dev into kind ($(K8S_CLUSTER)) ---"; \
+		kind load docker-image $$image:dev --name $(K8S_CLUSTER) || exit $$?; \
+	done
+
+k8s-apply: k8s-cluster ## Apply the dev kustomization (assumes images already built+loaded)
+	kubectl apply -k deploy/k8s/dev
+
+k8s-up: k8s-cluster k8s-build k8s-load k8s-apply ## Cluster + build + load + apply + wait + status
+	@echo "==> Waiting for stateful dependencies..."
+	-@kubectl -n auth  wait --for=condition=Ready  pod -l app.kubernetes.io/component=db    --timeout=120s
+	-@kubectl -n audit wait --for=condition=Ready  pod -l app.kubernetes.io/component=db    --timeout=120s
+	-@kubectl -n auth  wait --for=condition=Ready  pod -l app.kubernetes.io/component=cache --timeout=120s
+	@echo "==> Waiting for migrate jobs..."
+	-@kubectl -n auth  wait --for=condition=complete job/auth-migrate  --timeout=180s
+	-@kubectl -n audit wait --for=condition=complete job/audit-migrate --timeout=180s
+	@$(MAKE) -s k8s-status
+
+k8s-status: ## Show pods, services, and jobs across all service namespaces
+	@for ns in $(K8S_NAMESPACES); do \
+		printf '\n\033[1m===== namespace: %s =====\033[0m\n' "$$ns"; \
+		kubectl -n $$ns get pods,svc,jobs -o wide 2>&1 || true; \
+	done
+
+k8s-down: ## Delete the dev kustomization (kind cluster stays up)
+	-kubectl delete -k deploy/k8s/dev --ignore-not-found
+
+k8s-cluster-delete: ## Delete the kind cluster entirely
+	-kind delete cluster --name $(K8S_CLUSTER)
+
 # Service stack targets — listed in the help footer, not via ##@.
 # Register every service target as .PHONY in one go.
 service_targets := $(SERVICES) \
