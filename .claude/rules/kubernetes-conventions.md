@@ -87,8 +87,8 @@ Pod-template labels and Deployment selectors must include both `name` and `compo
 
 | Service | Service type | Port name | Notes |
 |---|---|---|---|
-| `audit-api` | ClusterIP | `http:8080` | Future Ingress lives in a `components/ingress/` (not built yet). |
-| `auth-api` | ClusterIP | `http:8080` | Same. |
+| `audit-api` | ClusterIP | `grpc:8080` | gRPC; `appProtocol: grpc` set on the port for future Gateway-API consumers. |
+| `auth-api` | ClusterIP | `http:8080` | Future Ingress lives in a `components/ingress/` (not built yet). |
 | `queue-api` | ClusterIP | `grpc:8080` | `appProtocol: grpc` set on the port for future Gateway-API consumers. |
 | `audit-worker` | NO Service | — | Workers are pull-based; nothing addresses them. |
 | `audit-db` / `auth-db` | ClusterIP (StatefulSet headless not used) | `postgres:5432` | Dev only — overlays/dev provides these. Prod overlay (when added) MUST omit them and point env at managed DB via Secret. |
@@ -101,8 +101,8 @@ In-cluster Postgres uses a StatefulSet + `volumeClaimTemplates` (kind's `local-p
 | Workload | Probe |
 |---|---|
 | `auth-api` | `httpGet /health` on port `http` (the `/health` route is mandated by the chi handler — see `auth/route/handler.go:22`). |
-| `audit-api` | `httpGet /health` (will exist when implemented; stub crashloops are expected for now). |
-| `queue-api` | `tcpSocket grpc:8080` — TCP probe avoids requiring a gRPC health-check implementation. Switch to `grpc:` probe (k8s 1.24+) when a gRPC health server is added. |
+| `audit-api` | Native `grpc:` probe on port `8080` (k8s 1.24+ GA). The audit gRPC server registers `grpc.health.v1` via `health.NewServer()`, which marks the empty service as `SERVING` by default — the probe needs no `service:` field. `port:` MUST be numeric; the native gRPC probe does not accept named ports. |
+| `queue-api` | Same as `audit-api` — native `grpc:` probe on port `8080`. queue/route/server.go also registers `grpc.health.v1`. |
 | `audit-worker` | None today. When implemented, prefer a tiny HTTP `/healthz` over `exec: [pgrep, worker]` for liveness. |
 | `*-db` (Postgres) | `exec: [pg_isready, -U, <user>, -d, <db>]` for both readiness and liveness. |
 | `auth-cache` (Redis) | `exec: [redis-cli, ping]` for both. |

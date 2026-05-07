@@ -42,14 +42,18 @@ spec:
           ports:
             - containerPort: 8080
               name: grpc
+          # Native gRPC probe (k8s 1.24+ GA). queue/route/server.go registers
+          # grpc.health.v1 with the empty service in SERVING, so an unset
+          # `service:` field is sufficient. `port:` MUST be numeric here —
+          # the native gRPC probe does not accept named ports.
           readinessProbe:
-            tcpSocket:
-              port: grpc
+            grpc:
+              port: 8080
             initialDelaySeconds: 3
             periodSeconds: 5
           livenessProbe:
-            tcpSocket:
-              port: grpc
+            grpc:
+              port: 8080
             initialDelaySeconds: 10
             periodSeconds: 10
           lifecycle:

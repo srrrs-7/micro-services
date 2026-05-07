@@ -41,22 +41,24 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
-              name: http
+              name: grpc
           envFrom:
             - configMapRef:
                 name: audit-api-config
             - secretRef:
                 name: audit-api-secret
+          # Native gRPC probe (k8s 1.24+ GA). The audit server registers
+          # grpc.health.v1 with the empty service in SERVING, so an unset
+          # `service:` field is sufficient. `port:` MUST be numeric here —
+          # the native gRPC probe does not accept named ports.
           readinessProbe:
-            httpGet:
-              path: /health
-              port: http
+            grpc:
+              port: 8080
             initialDelaySeconds: 3
             periodSeconds: 5
           livenessProbe:
-            httpGet:
-              path: /health
-              port: http
+            grpc:
+              port: 8080
             initialDelaySeconds: 10
             periodSeconds: 10
           lifecycle:

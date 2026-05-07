@@ -42,7 +42,7 @@ modules/<svc>/deploy/k8s/
 
 | Namespace | サービス | 提供する公開エンドポイント |
 |---|---|---|
-| `audit` | audit-api（HTTP）、audit-worker（pull型・Service なし）、audit-db、audit-migrate Job | `audit-api.audit.svc.cluster.local:8080` |
+| `audit` | audit-api（gRPC）、audit-worker（pull型・Service なし）、audit-db、audit-migrate Job | `audit-api.audit.svc.cluster.local:8080` |
 | `auth`  | auth-api（HTTP）、auth-db、auth-cache（Redis）、auth-migrate Job | `auth-api.auth.svc.cluster.local:8080` |
 | `queue` | queue-api（gRPC） | `queue-api.queue.svc.cluster.local:8080` |
 
@@ -75,7 +75,7 @@ modules/<svc>/deploy/k8s/
 | auth-migrate | Job (one-shot) | — | — | `atlas migrate apply` |
 | queue-api | Deployment | 2 | ClusterIP `queue-api:8080` (`appProtocol: grpc`) | gRPC priority queue |
 
-> **dev では `audit-api` / `audit-worker` / `queue-api` のバイナリは stub** で、起動直後に exit するため CrashLoopBackOff になる。これはマニフェストの問題ではなく実装段階の問題。`auth-api` のみが現状動く（`auth/cmd/api/main.go` 参照）。
+> **stub バイナリ**: `audit-worker` のみ（起動直後に `fmt.Println` して exit するため CrashLoopBackOff）。`audit-api` / `queue-api` は gRPC サーバ（`route/server.go` で `grpc.health.v1` + reflection を register、interceptor チェイン込み）を起動して常駐するので Running になる。`auth-api` も chi で動作する。
 
 ## 5. ロードバランシングと可用性
 
@@ -180,13 +180,13 @@ Pod 終了時、kubelet が SIGTERM を送るのと同時に kube-proxy は Endp
 | Workload | readiness | liveness |
 |---|---|---|
 | auth-api | `httpGet /health` (port `http`) | 同上 |
-| audit-api | `httpGet /health` (port `http`) | 同上（実装後に効く。stub の現状は失敗継続） |
-| queue-api | `tcpSocket grpc:8080` | 同上（gRPC HealthCheck サーバ実装後は `grpc:` プローブに切替） |
+| audit-api | native `grpc:` (port `8080`) | 同上 |
+| queue-api | native `grpc:` (port `8080`) | 同上 |
 | audit-worker | （未設定） | 実装後に `/healthz` HTTP を推奨。`exec: pgrep` は避ける |
 | audit-db / auth-db | `exec: pg_isready -U <user> -d <db>` | 同上 |
 | auth-cache | `exec: redis-cli ping` | 同上 |
 
-`/health` のエンドポイントは `auth/route/handler.go:22` の chi ハンドラで200を返す前提。同等のものを audit/queue にも実装することが前提条件（規約 §6）。
+auth-api の `/health` は `auth/route/handler.go:22` の chi ハンドラで200を返す前提。audit-api / queue-api は両方とも `route/server.go` で `health.NewServer()` を `grpc.health.v1` として register しており、`health.NewServer()` はデフォルトで空 service を `SERVING` にマークするので、native `grpc:` プローブに `service:` を指定する必要はない。`port:` は数値必須（k8s 1.24+ GA の native gRPC プローブは named port を受け付けない）。
 
 ## 7. リソース要求 / 制限
 
@@ -288,11 +288,11 @@ make k8s-cluster-delete  # kind クラスタを消す
 
 期待される定常状態:
 
-- `auth-api` Pod: 2台 Running 1/1 Ready
+- `auth-api`, `audit-api`, `queue-api` Pod: 2台 Running 1/1 Ready
 - `auth-db`, `audit-db`: 1台 Running 1/1 Ready
 - `auth-cache`: 1台 Running 1/1 Ready
 - `auth-migrate`, `audit-migrate`: Completed
-- `audit-api`, `audit-worker`, `queue-api`: **CrashLoopBackOff**（stub バイナリ。バグではない）
+- `audit-worker`: **CrashLoopBackOff**（stub バイナリで `fmt.Println` 後 exit。バグではない）
 
 ### 12.2 devcontainer 特有の初回セットアップ
 
@@ -368,7 +368,7 @@ kubectl -n auth rollout restart deployment/auth-api # 該当を再起動
 |---|---|
 | ✅ ある | dev overlay（kind）、base 側の HA 設定（replicas:2, RollingUpdate, Anti-Affinity, PDB, preStop） |
 | ❌ まだない | staging / prod overlay。Ingress（外部公開）、ExternalSecrets、HPA、ServiceMonitor、ClusterIssuer 等の本番配線 |
-| ⚠️ stub | audit-api / audit-worker / queue-api のバイナリ。Pod は CrashLoopBackOff で正常 |
+| ⚠️ stub | audit-worker のバイナリのみ。Pod は CrashLoopBackOff で正常（`audit-api` / `queue-api` は gRPC サーバとして常駐する） |
 | ⚠️ kindnet 制限 | NetworkPolicy が dev 環境では強制されない。Calico を入れれば強制される |
 | ⚠️ 単一 PV | dev の PVC は kind の local-path-provisioner（ノード固有）。マルチノード kind では Pod が別ノードに schedule された瞬間にデータを失う |
 

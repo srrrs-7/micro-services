@@ -12,6 +12,7 @@ spec:
     app.kubernetes.io/name: audit
     app.kubernetes.io/component: api
   ports:
-    - name: http
+    - name: grpc
       port: 8080
-      targetPort: http
+      targetPort: grpc
+      appProtocol: grpc
