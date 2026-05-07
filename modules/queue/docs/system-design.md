@@ -9,7 +9,8 @@
 ## 1. 目的とスコープ
 
 ### 1.1 目的
-- 社内サービス間の **非同期メッセージング基盤** を提供する。具体的な第一ユーザは `audit-worker` (`audit-api` から流入する監査イベントを後段で処理) を想定。
+- 社内サービス間の **非同期メッセージング基盤** を提供する。
+- **第一当事者ユースケース**: `audit/docs/system-design.md` §4.2 の **非同期取り込み経路** を成立させる。具体的には任意の upstream サービス (`auth-api` 等) が監査イベント JSON を `audit.events` topic に publish し、`audit-worker` が consume して `audit-db` に書き込む経路。`audit-worker` は本サービスの **第一の consumer** として位置付ける。
 - 単純な **work queue (consumer 競合)** と **pub/sub (consumer group ごとに fan-out)** を **同じ API** で扱える、Kafka に似た「ログ + 消費グループ」抽象を提供する。
 - Kafka が苦手とする **メッセージ単位の優先度** と **個別 ack/nack による再配送** を一級概念として持つ。
 - 運用負荷を最小化するため、当面はクラスタを組まず **単一プロセス + 既存 Postgres** で構築する。スループット要件は MVP 時点で **数百 msg/s 以下** を想定。
@@ -143,24 +144,81 @@ modules/queue/src/
 
 ### 3.3 サービス境界
 
+`audit/docs/system-design.md` §4.2 のデータフローを再掲した上で、queue を中心に書き直すと以下となる。
+
 ```
-┌─────────────────┐  Publish       ┌────────────┐
-│  audit-api      │ ─────────────▶ │            │   Consume + Ack
-│  (Producer)     │                │  queue-api │ ◀──────────────────  audit-worker
-└─────────────────┘  gRPC unary    │            │  gRPC long-poll      (Consumer)
-                                   └─────┬──────┘
-                                         │ SELECT FOR UPDATE
-                                         ▼ SKIP LOCKED
-                                   ┌────────────┐
-                                   │ queue-db   │ Postgres (既存 migrator + Atlas)
-                                   └────────────┘
+[ upstream producers ]            [ queue-api ]              [ consumers ]            [ stores ]
+  auth-api  ──┐                                                                       ┌─ audit-db
+  audit-api ──┤   Publish (JSON bytes,                  Consume + Ack                 │
+  (any svc) ──┼──▶ topic="audit.events", priority=N) ──▶  ◀────────  audit-worker ───▶┘
+              │   gRPC unary                              gRPC long-poll
+              │                                                                       (将来追加の
+              │                                                                        consumer も
+              └──▶ Publish ────▶ queue-api ◀── Consume ──── (将来追加の worker)        同 API)
+                                     │
+                                     │ SELECT FOR UPDATE OF deliveries SKIP LOCKED
+                                     ▼
+                              ┌─────────────┐
+                              │  queue-db   │ Postgres (新設、既存 migrator + Atlas を流用)
+                              └─────────────┘
 ```
 
-- **Producer**: `audit-api`、将来追加の他サービス。`queue:publish` scope を持つ Bearer JWT で gRPC を呼ぶ。
-- **Consumer**: `audit-worker`、将来の追加 worker。`queue:consume` scope。consumer group 名 (= 通常はサービス名 / ロール名) を都度指定する。
+- **Producer**: `auth-api`、`audit-api`、その他 upstream サービス。**audit-api 自身も producer になりうる** (sync 取り込みエンドポイントを内部的に async に倒す場合等)。`queue:publish` scope を持つ Bearer JWT で gRPC を呼ぶ。
+- **Consumer**: 第一の当事者は `audit-worker` (subscription `audit-worker`)。将来追加の worker も同 API。`queue:consume` scope。consumer group 名 (= 通常はサービス名 / ロール名) を都度指定する。
 - **Admin**: `queue:admin` scope。dev では Make ターゲットや CLI から、本番では運用 API 経由でのみ使う。
 
 クロスサービス通信は k8s 内部 DNS (`queue-api.queue.svc.cluster.local:8080`) で解決する (`.claude/rules/kubernetes-conventions.md` §5)。
+
+### 3.4 audit サービスとの結合 (cross-service contract)
+
+queue と audit は密に協調する。本設計で固定する契約を以下に列挙する。
+
+#### 3.4.1 トピック / サブスクリプション seed
+
+audit MVP の async 取り込みのために、Phase 1.0 完了直後に以下を seed する (admin RPC から流すか、Atlas マイグレーション内で `INSERT` する):
+
+| 種別 | 名前 | 設定 | 根拠 |
+|---|---|---|---|
+| topic | `audit.events` | `default_ttl=7d`, `max_priority=9` | §4.1 既定 |
+| topic | `audit.events.dlq` | `default_ttl=30d`, `max_priority=0` | DLQ は長めに保持し、人手で再処理する想定 |
+| subscription | `audit.events` × `audit-worker` | `visibility_timeout=30s`, `max_attempts=100`, `dlq_topic="audit.events.dlq"` | audit §9.2 が "100 回超のリトライ後 DLQ" と定義 |
+
+`max_attempts=100` は queue 側の `CHECK (max_attempts BETWEEN 1 AND 100)` の上限と一致するため、CHECK 制約は **そのまま** 維持する。
+
+#### 3.4.2 メッセージペイロード形式
+
+queue 自身は payload を **opaque bytes** として扱う (§6.1 `bytes payload`)。audit との契約として、`audit.events` topic に流すメッセージは以下のフォーマット:
+
+- payload: `audit/docs/system-design.md` §6.1 の JSON 全体 (UTF-8、`event_id` を含む)
+- headers (任意): `content-type: application/json`、OTel propagation 用 `traceparent` 等
+- `partition_key`: 順序を要するなら `actor_id` を入れる (例: 同一ユーザの操作順保持)。priority を混ぜると順序が壊れる点は §5.2 / §9 を参照。
+- `priority`: audit は実質 0 で運用 (§9 の妥協を踏まえ、同 partition_key で priority を混ぜない)
+
+冪等性は **audit_events.event_id の UNIQUE 制約** + worker 側の `ON CONFLICT (event_id) DO NOTHING` で吸収する (audit §9.2)。queue 側は idempotency_key を Phase 2 まで実装しない (§14 Q6) — 二段目の防壁が DB 側にあるため MVP では充足する。
+
+#### 3.4.3 queue → audit への監査イベント発行
+
+audit §3.1 が `queue.message.published` / `queue.message.consumed` を action 定義の一部として持っている。この期待を満たすため、queue-api は以下の監査イベントを **audit-api の sync POST `/audit/v1/events`** へ送る:
+
+| 発火タイミング | action | actor | resource | 主要 details |
+|---|---|---|---|---|
+| `Publish` 成功時 | `queue.message.published` | JWT の `sub` (= producer サービスの client_id) を `actor.id`、`actor_type=service` | `resource_type="queue.message"`, `resource_id=<message_id>` | `topic`, `priority`, `partition_key`, `payload_size` (payload **本体は入れない**) |
+| `Ack` 成功時 | `queue.message.consumed` | consumer の JWT `sub`, `actor_type=service` | 同上 | `topic`, `subscription`, `attempt_count`, `latency_ms` (publish→ack) |
+| DLQ 移送時 | `queue.message.dead_lettered` | `actor_type=system, actor_id="queue-api"` | 同上 | `topic`, `subscription`, `attempt_count`, `last_error` |
+
+実装上の注意:
+- **best-effort 送信**: queue→audit 送信失敗が queue の publish/ack を失敗させない (循環依存と再帰失敗を避ける)。失敗は slog に warning で出すのみ。
+- **payload 本文を載せない**: PII リスク回避 (audit §6.3)。サイズと topic 名のみ。
+- **無限ループ回避**: queue-api が監査イベントを送る経路は **audit-api への HTTP 同期 POST のみ** とし、自身の `audit.events` topic には流さない (流すと queue.message.published を publish するためにまた publish が起き発散する)。
+- 取得する `actor.id` は queue 側で interceptor が抽出した JWT `sub` を **強制利用** する (audit §11.2 の actor 検証ルールに従う)。
+
+#### 3.4.4 PII / 秘密情報の責務分担
+
+audit §6.3 の blocklist は **payload 内容** に対する規制で、queue は payload を opaque bytes としてしか見ない。したがって:
+
+- **producer 側の責務**: publish 前に payload を sanitize する (audit §6.3 の禁止リストに従う)。
+- **queue 側の責務**: §11 の通り **headers の禁止キー** (`authorization`, `cookie`, `set-cookie`) のみを拒否する。payload 中身は検査しない。
+- queue が監査イベントを発行する際 (§3.4.3) は、queue-api 自身が出力する `details` に **payload を載せない** ことで blocklist を尊重する。
 
 ---
 
@@ -776,7 +834,9 @@ sequenceDiagram
 | 認可 (scope) | `queue:publish` / `queue:consume` / `queue:admin` / `queue:read` を分離 |
 | Multi-tenant | MVP は **single-tenant**。`producer_id` は監査用に記録するが、tenant 境界とは扱わない |
 | Payload 暗号化 (at-rest) | Postgres TDE / pg-encrypt は **使わない**。秘密データを payload に置かない運用ガイドを徹底 |
+| **PII / 秘密情報の検査** | queue は payload を opaque bytes として扱うため **producer 側で sanitize する責務** (`audit/docs/system-design.md` §6.3 の禁止リストに従う)。queue 側はキー名 (headers) のみ検査 |
 | Headers の取り扱い | producer 任意の k/v を受けるが、**`authorization`, `cookie`, `set-cookie` キーは publish 時に拒否** (誤秘密情報混入防止) |
+| **DB ロール** | audit は append-only のため `INSERT, SELECT` のみだが、**queue は `deliveries` の state 遷移で `UPDATE` 必須**。queue の DB ロール `queue_app` は `INSERT, SELECT, UPDATE` を持つ。これは「キューは性質上 mutable」という意図的な差異であり、append-only 規約を本サービスには適用しない |
 | Replay / Idempotency | producer 側で発番した `idempotency_key` を headers に含めても重複排除しない (Phase 2)。Consumer は idempotent に書く必要あり |
 | Lease ID の盗用 | base64(delivery_id) は推測しにくいが秘密ではない。`leased_by` 一致を ack/nack の必須条件にする (= consumer 自身が発行した lease 以外は触れない) |
 | ログ漏洩 | payload は slog に出さない。`message_id`, `topic`, `subscription`, `attempt`, `priority` のみログ |
@@ -805,13 +865,15 @@ sequenceDiagram
 | Phase | 内容 | 完了条件 |
 |---|---|---|
 | **0** (現状) | proto 3 サービス分離 + main.go は Println のみ | — |
-| **1.0** | DB 設計実装 (Atlas マイグレーション + sqlc 生成)、proto 刷新、admin RPC | `CreateTopic` / `CreateSubscription` が通る |
-| **1.1** | Producer 側 (`Publish` / `PublishBatch`) + Bearer JWT interceptor | `audit-api` から実際に enqueue できる |
-| **1.2** | Consumer 側 (`Consume` long-poll + `Ack` / `Nack`) | `audit-worker` skeleton が pull → ack できる |
+| **1.0** | DB 設計実装 (Atlas マイグレーション + sqlc 生成)、proto 刷新、admin RPC、`audit.events` / `audit.events.dlq` topic と `audit-worker` subscription の seed (§3.4.1) | `CreateTopic` / `CreateSubscription` が通り、上記 seed が適用済み |
+| **1.1** | Producer 側 (`Publish` / `PublishBatch`) + Bearer JWT interceptor + queue→audit 監査イベント発行 (§3.4.3) | upstream サービスから `audit.events` に enqueue でき、`queue.message.published` が audit-db に積まれる |
+| **1.2** | Consumer 側 (`Consume` long-poll + `Ack` / `Nack`) + `queue.message.consumed` 監査発行 | **audit-worker (audit/docs §13 Phase 1.1) のブロッカ解消条件**: skeleton が pull → ack できる |
 | **1.3** | `ExtendLease`、retention bg job、月次パーティション自動作成 | 7 日経過で古いパーティションが drop される |
-| **1.4** | DLQ (deadletters + dlq_topic 再 publish) | 連続失敗で dead_letters 行が出る e2e テスト |
-| **1.5** | メトリクス、`Get*Stats` RPC、CLI 補助 | Prometheus に backlog が出る |
+| **1.4** | DLQ (deadletters + dlq_topic 再 publish) + `queue.message.dead_lettered` 監査発行 | 連続失敗で dead_letters 行が出る e2e テスト、audit-db にも記録される |
+| **1.5** | メトリクス、`Get*Stats` RPC、CLI 補助、gRPC Health Check | Prometheus に backlog が出る、audit §12 の障害確認手順が機能する |
 | **2.x** | server-streaming `Subscribe`、LISTEN/NOTIFY、partition_key 物理分散、idempotency_key、mTLS、Kafka 互換ゲートウェイ (検討) | 別設計書 |
+
+**audit との Phase 依存:** audit `Phase 1.1` (async 取り込み) は queue `Phase 1.2` 完了が前提。逆に queue `Phase 1.1` の queue→audit 監査発行は audit `Phase 1.0` (sync 取り込み) 完了に依存する。両モジュールの Phase 進行は **audit 1.0 → queue 1.0/1.1 → queue 1.2 → audit 1.1** の順で揃える。
 
 ---
 
@@ -819,11 +881,12 @@ sequenceDiagram
 
 1. **JWT 検証ライブラリ** — `auth` 設計書 §13 と揃える。`auth` で決定したものを queue 側でも採用する。
 2. **DB 同居 vs 分離** — `queue-db` を新設するか、`audit-db` に間借りするか。間借りはマイグレーションの責務が混ざる + I/O 競合リスク。**新設を採用** し、k8s overlay に StatefulSet を追加する。compose も `queue-db` を 5434 で公開する想定。
-3. **長期保持バックアップ** — 「DLQ も含めて全イベントを長期保管したい」要件が出たら、`audit-api` 側で消費して保存する経路に倒すか、queue 側に S3 export job を生やすかを判断。
+3. **長期保持バックアップ** — 「DLQ も含めて全イベントを長期保管したい」要件が出たら、`audit-api` 側で消費して保存する経路に倒すか、queue 側に S3 export job を生やすかを判断。audit §10.2 の S3 連携 (Phase 2) と統合的に再検討する。
 4. **Producer の bulk INSERT 上限** — `PublishBatch` のサイズ上限。gRPC のメッセージサイズ既定 4MB に従い 4MB とする方針だが、payload 平均 1KB なら 4096 件 / batch。実装着手時に再検討。
 5. **`partition_key` のハッシュ衝突** — 物理パーティション昇格時 (Phase 2) のキー → パーティション写像。MVP では文字列保存のみで論理利用に留める。
-6. **idempotency_key の取り扱い** — MVP では「Consumer 側で吸収」と割り切るが、この前提を運用ガイドラインに明記する必要がある。
+6. **idempotency_key の取り扱い** — MVP では「Consumer 側で吸収」と割り切る。audit ユースケース (§3.4.2) は `event_id` UNIQUE で吸収するため queue 側 idempotency_key 不要だが、event_id を持たない将来ユースケース向けには Phase 2 で追加する。`audit/docs/system-design.md` §15.1 の "queue.proto の audit 用拡張" は、本設計の `bytes payload` + `string topic` + `map<string,string> headers` (§6.1) で **充足するため当該 Open Question を Closed として扱う**。
 7. **gRPC Health Check (`grpc.health.v1`) の実装** — `kubernetes-conventions.md` §6 の「将来 grpc プローブに切り替え」に合わせて、Phase 1.5 で `health.NewServer()` を登録する。
+8. **audit-api への監査イベント送信パス** — §3.4.3 で sync HTTP POST を採用しているが、auth-api/audit-api 間で gRPC を使う方針に倒した場合は経路を統一すべき。audit が gRPC ingest を実装するかは audit Phase 1.0 の判断次第 (現状 audit §7.1 は HTTP のみ)。
 
 ---
 
