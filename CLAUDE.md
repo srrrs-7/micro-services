@@ -59,3 +59,10 @@ cd modules/<service>/src && go test -run TestName ./path/to/pkg
 - **Request decoding**: `utilhttp.RequestBody[T]` and `RequestUrlParam[T]` require `T` to implement `Validate() error` (the `Validator` interface). New request types under `route/request/` must satisfy this.
 - **Logging**: call `utillog.NewLogger()` once in `init()` to install a JSON `slog` handler at debug level, then use `slog` directly.
 - **Generated code**: `infra/database/db/*.go` (sqlc output) and the unimplemented gRPC stubs under `modules/queue/src/route/grpc/` are generated — modify the source (`.sql` queries, `.proto`) and regenerate.
+
+## Detailed Rules
+
+The following files contain the full coding standards and testing policy for this repo. Treat them as binding for any change you author here.
+
+@.claude/rules/coding-standards.md
+@.claude/rules/testing.md
