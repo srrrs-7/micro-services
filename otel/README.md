@@ -153,7 +153,7 @@ Compose env in `compose.yml` sets these per service; `make obs-up` documents the
 
 - **Phase 1:** stack up; traces + metrics flow end-to-end; logs pipeline configured but no producer (slog stays on stdout).
 - **Phase 2 (this PR):** dashboards split into three focused views (`go-runtime`, `http-red`, `grpc-red`) using OTel-semconv-current metric names (`go_*`, `rpc_server_call_duration_seconds_*`, `http_server_request_duration_seconds_*`); recording rules for RED quantities under `otel/prometheus/rules/recording.yml`; alert rules under `otel/prometheus/rules/alerts.yml` covering ServiceDown / High{HTTP,gRPC}{ErrorRate,LatencyP95}. Prometheus runs with `--web.enable-lifecycle` so reloading rules is `curl -X POST http://localhost:9090/-/reload`.
-- **Phase 3:** logs producer — choose between `filelog` receiver (compose-local, no code change) and `otelslog` bridge in `shared/utillog` (trace ID auto-injection, code change). Wire chosen path into the `logs` pipeline.
+- **Phase 3 (this PR):** logs producer wired via the **otelslog bridge** path. `shared/utilotel.Init` now also configures a LoggerProvider with an OTLP gRPC log exporter, then wraps the slog default handler with a tee that fans out to both stdout JSON (existing behaviour) and the OTel log SDK. Trace context on the call site (`slog.InfoContext(ctx, ...)`) is auto-attached as `trace_id` / `span_id` record attributes by the bridge, so Tempo→Loki correlation works end-to-end. The Collector logs pipeline is unchanged from Phase 1 (already shipped to Loki); no Collector / Loki config changes were needed.
 - **Phase 4:** Kubernetes overlays under `deploy/k8s/observability/{base,overlays/dev}/` mirroring the per-service module pattern, in a new `observability` namespace. Same Collector / Prometheus / Tempo / Loki / Grafana shape; image tags `:dev`, configmap-mounted configs, Downward API for `k8s.pod.name` resource attributes.
 
 ## Phase 2 — recording + alert rules + split dashboards
@@ -186,6 +186,37 @@ Grafana auto-reloads dashboards every 30s via the dashboards provisioning provid
 | `grpc-red` | gRPC RED (audit / queue) | RPC rate by method / errors by status code (excluding OK) / latency quantiles / top slow methods |
 
 **Alerts and dev stubs.** `HighGRPCErrorRate` deliberately excludes `rpc_grpc_status_code="12"` (UNIMPLEMENTED) so audit's Phase 1 stub handlers don't page during dev. Drop the exclusion once real handlers land — see `otel/prometheus/rules/alerts.yml` for the comment that calls this out.
+
+## Phase 3 — logs via the otelslog bridge
+
+After pulling Phase 3, rebuild the affected service stacks so the new SDK code paths take effect:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 make audit-build
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 make audit-up
+```
+
+(Same shape for `make auth-*`.) `make audit-down && make audit` works too — only the binaries need to be rebuilt because the bridge wiring is in `shared/utilotel`.
+
+Verify logs are landing in Loki:
+
+```bash
+# Loki ingestion stats
+curl -fsSG http://localhost:3100/loki/api/v1/labels | jq '.data'
+# expect: ["service_name"] plus any other labels Loki extracted from
+# OTLP resource attributes / structured metadata
+
+# Recent records for a service
+curl -fsSG http://localhost:3100/loki/api/v1/query \
+  --data-urlencode 'query={service_name="audit-api"}' \
+  --data-urlencode 'limit=5' | jq '.data.result[].values[][1]' | head
+```
+
+Or in Grafana → Explore → Loki: `{service_name="audit-api"}` returns recent log lines. Open a trace in Tempo, click the "Logs for this span" button — the tracesToLogs link (provisioned in `otel/grafana/provisioning/datasources/default.yaml`) jumps to Loki filtered by service.name.
+
+**Where the trace IDs come from.** When code uses `slog.InfoContext(ctx, "...")` and ctx carries an active span, the otelslog bridge reads the trace context and writes `trace_id` / `span_id` as record attributes. With OTLP-to-Loki ingest, those become structured metadata on the log entry — Loki query `{service_name="audit-api"} | trace_id=~".+"` filters to traced log lines.
+
+Existing handler code that uses bare `slog.Info("...")` (no ctx) still flows through, but without trace correlation. To get correlation, switch to `slog.InfoContext(ctx, "...")` in handler code paths that have a request context.
 
 ## Design rationale
 
