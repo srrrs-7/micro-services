@@ -153,7 +153,7 @@ Compose env in `compose.yml` sets these per service; `make obs-up` documents the
 
 - **Phase 1:** stack up; traces + metrics flow end-to-end; logs pipeline configured but no producer (slog stays on stdout).
 - **Phase 2 (this PR):** dashboards split into three focused views (`go-runtime`, `http-red`, `grpc-red`) using OTel-semconv-current metric names (`go_*`, `rpc_server_call_duration_seconds_*`, `http_server_request_duration_seconds_*`); recording rules for RED quantities under `otel/prometheus/rules/recording.yml`; alert rules under `otel/prometheus/rules/alerts.yml` covering ServiceDown / High{HTTP,gRPC}{ErrorRate,LatencyP95}. Prometheus runs with `--web.enable-lifecycle` so reloading rules is `curl -X POST http://localhost:9090/-/reload`.
-- **Phase 3 (deferred):** the otelslog bridge path was wired but disabled after `go.opentelemetry.io/otel/sdk/log` v0.19 segfaulted inside its `sync.Pool.getSlow` path on the first attribute-bearing log record under Go 1.26.2 (audit-api crashed on the first interceptor log line). The wiring still exists in code (`shared/utilotel/slog.go` teeHandler + `installSlogBridge`) but `Init` no longer installs it. Logs flow only to stdout via `shared/utillog` until we either bump sdk/log to a stable release or pivot to a `filelog` receiver in the Collector. The Collector / Loki side remains ready — only the producer is paused. The `slog.InfoContext` change to interceptors stays (cheap, ctx-aware logging is good practice on its own).
+- **Phase 3 (deferred):** the otelslog bridge path was attempted but every audit-api crashed with a SIGSEGV inside `go.opentelemetry.io/otel/sdk/log` v0.19's `sync.Pool.getSlow` on the first attribute-bearing log record (Go 1.26.2). The bridge wiring + scaffold (`shared/utilotel/slog.go`) was reverted; logs continue to flow only to stdout via `shared/utillog`. The Collector / Loki side remains ready (Loki container, datasource, and Collector logs pipeline are still provisioned). The `slog.InfoContext` switch in the gRPC interceptors stayed — ctx-aware logging is net-positive on its own. Re-attempt path: wait for an upstream sdk/log release with the Pool fix, re-add a `LoggerProvider` + small slog bridge inside `Init`, and restore `lp.Shutdown` to the cleanup chain. Alternative: pivot to a `filelog` receiver tailing `/var/lib/docker/containers/*/*.log` on the Collector — code-change-free but loses inline trace_id correlation unless the JSON body carries it.
 - **Phase 4:** Kubernetes overlays under `deploy/k8s/observability/{base,overlays/dev}/` mirroring the per-service module pattern, in a new `observability` namespace. Same Collector / Prometheus / Tempo / Loki / Grafana shape; image tags `:dev`, configmap-mounted configs, Downward API for `k8s.pod.name` resource attributes.
 
 ## Phase 2 — recording + alert rules + split dashboards
@@ -189,13 +189,18 @@ Grafana auto-reloads dashboards every 30s via the dashboards provisioning provid
 
 ## Phase 3 — paused
 
-The otelslog bridge was disabled after a SIGSEGV inside `sdk/log v0.19`'s `sync.Pool` path crashed every audit-api on the first attribute-bearing log record. The producer side is reverted; the rest (Loki container, Grafana datasource, Collector logs pipeline, slog tee handler scaffold, `slog.InfoContext` call sites) stays in place so re-enabling is one Init function edit away.
+The otelslog bridge crashed every audit-api on the first attribute-bearing log record (`sdk/log v0.19` Pool segfault). Producer code was deleted; the receiving side stays ready:
 
-To re-attempt: bump `go.opentelemetry.io/otel/sdk/log`, `go.opentelemetry.io/otel/log`, and `go.opentelemetry.io/contrib/bridges/otelslog` to a release that includes the upstream Pool fix (track the project's issue tracker for the regression), then restore the LoggerProvider construction and `installSlogBridge(serviceName)` call inside `shared/utilotel.Init`. Re-add `lp.Shutdown(sctx)` to the returned shutdown chain. No service-side change is required — the call sites already use `slog.InfoContext`.
+- Loki + Grafana Loki datasource + Collector logs pipeline: provisioned, idle.
+- `shared/utillog` keeps writing JSON to stdout — visible via `docker logs <svc>`.
+- Interceptors continue to use `slog.InfoContext(ctx, ...)` so a future bridge picks up trace context with no further service edits.
 
-The fallback documented earlier remains valid:
+When sdk/log ships a fix (or we pivot to a `filelog` receiver), the re-enable is small: construct a `LoggerProvider` + `BatchProcessor` over `otlploggrpc.New(ctx)` inside `Init`, install a tee that wraps the existing slog default with `otelslog.NewHandler(serviceName)`, and append `lp.Shutdown(sctx)` to the cleanup. The previous attempt's deletion lives in git (commit removing `utilotel/slog.go`) for reference.
+
+The Phase 1 / 2 / 4 stack is unaffected.
 
 ```bash
+# Phase 1 / 2 service rebuild — unchanged
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 make audit-build
 
 ```bash
