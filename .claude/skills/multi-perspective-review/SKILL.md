@@ -1,11 +1,11 @@
 ---
 name: multi-perspective-review
-description: Use to run a complete cross-cutting code review on the current change — dispatches eight reviewer sub-agents (security, performance, coding-conventions, maintainability, testability, reliability, scalability, compliance) in parallel and aggregates their findings into a single prioritized report. Triggers when the user asks for a "full review", "multi-angle review", "release-readiness check", or "review this branch / PR / diff".
+description: Use to run a complete cross-cutting code review on the current change — dispatches nine reviewer sub-agents (security, performance, coding-conventions, maintainability, testability, reliability, scalability, compliance, refactoring) in parallel, aggregates their findings into a prioritized report, AND saves the report + actionable checklist as a dated history file under `doc/review/`. Triggers when the user asks for a "full review", "multi-angle review", "release-readiness check", or "review this branch / PR / diff".
 ---
 
 # Multi-perspective code review
 
-Run all eight reviewer agents in parallel against the current change, then merge their reports into one ordered list ranked by severity. This is the integration point — each individual reviewer is opinionated and narrow; this skill is what makes them usable together.
+Run all nine reviewer agents in parallel against the current change, merge their reports into one ordered list ranked by severity, and persist the result as a dated review log under `doc/review/`. This is the integration point — each individual reviewer is opinionated and narrow; this skill is what makes them usable together AND what makes review findings durable instead of ephemeral chat output.
 
 This skill complements `.claude/agents/go-reviewer.md` (which is repo-specific Go idioms and runs separately). Don't dispatch `go-reviewer` from this skill — it overlaps with `coding-conventions-reviewer` enough that running both adds noise. The user can run `go-reviewer` separately when they want it.
 
@@ -19,18 +19,21 @@ Use when the user asks for any of:
 
 If the user names ONE perspective ("security review please", "perf review only"), do NOT use this skill — dispatch only that one agent directly. This skill is for when they want all of them.
 
-## Reviewer roster (8 agents, parallel)
+## Reviewer roster (9 agents, parallel)
 
 | Agent (`subagent_type`) | What it owns |
 |---|---|
 | `security-reviewer` | AuthN/Z, injection, secrets, transport, prompt injection |
 | `performance-reviewer` | N+1, allocations, blocking I/O, fan-out cost |
 | `coding-conventions-reviewer` | Cross-cutting style: naming, layout, imports, comments |
-| `maintainability-reviewer` | Function/file size, complexity, duplication, dead code |
+| `maintainability-reviewer` | Function/file size, complexity, duplication, dead code (diagnoses *symptoms*) |
 | `testability-reviewer` | Seams, DI, TDD compliance, behavior coverage |
 | `reliability-reviewer` | Error propagation, timeouts, retries, panics, shutdown |
 | `scalability-reviewer` | Shared state, single-writer, pool sizing, fan-out at N |
 | `compliance-reviewer` | PII, audit trail, retention, secret handling |
+| `refactoring-reviewer` | Concrete commit-sized transformations with before/after sketches (prescribes *treatments*) |
+
+`maintainability-reviewer` and `refactoring-reviewer` are paired — the first names the smell ("function too long, leaky abstraction"), the second names the move ("extract X from lines 22-34, no test changes"). Run both. They disagree usefully.
 
 Each agent's full prompt lives at `.claude/agents/<name>.md`.
 
@@ -46,7 +49,7 @@ Decide the scope based on what the user said:
 | "review this PR" / `gh pr ...` | `gh pr diff <num>` content |
 | "review my staged changes" / "what I have right now" | `git diff --staged` AND `git diff` (unstaged) AND `git status` (untracked) |
 | "review modules/auth/src/service/login.go" | the path(s) the user named |
-| Nothing specific | Ask before dispatching — wasting 8 agents on the wrong scope is the worst failure mode. |
+| Nothing specific | Ask before dispatching — wasting 9 agents on the wrong scope is the worst failure mode. |
 
 Capture the diff once via `Bash`. Don't re-fetch it inside each agent; pass it as text in the prompt.
 
@@ -74,9 +77,9 @@ Keep the brief under ~50KB. If the diff is bigger, split by directory and dispat
 
 If the user only mentioned files (no `git diff` available), include `Read`-pulled file contents instead.
 
-## Step 3: Dispatch all eight in parallel — one message, eight tool calls
+## Step 3: Dispatch all nine in parallel — one message, nine tool calls
 
-This is the whole point of the skill. Use ONE message containing eight `Agent` tool calls. The runtime executes them concurrently; sequential dispatch defeats the design.
+This is the whole point of the skill. Use ONE message containing nine `Agent` tool calls. The runtime executes them concurrently; sequential dispatch defeats the design.
 
 For each call:
 - `subagent_type`: the reviewer name (`security-reviewer`, etc.)
@@ -87,11 +90,11 @@ Each agent reads the brief, applies its own prompt, and returns its own report f
 
 ## Step 4: Aggregate and prioritize
 
-Receive the eight reports. Build a single deliverable:
+Receive the nine reports. Build a single deliverable:
 
 ### 4a. Top-line verdict
 
-Aggregate the eight verdicts into one. Mapping:
+Aggregate the nine verdicts into one. Mapping:
 
 | Aggregated | When |
 |---|---|
@@ -100,6 +103,8 @@ Aggregate the eight verdicts into one. Mapping:
 | `minor-cleanup` | Only style / drift / non-blocking findings across reviewers |
 | `ship-it` | All reviewers came back clean |
 
+The refactoring reviewer's verdicts (`ship-as-is` / `small-improvements` / `substantial-refactor-warranted`) feed the aggregate but never escalate it on their own — refactoring proposals are advisory, not blocking. A `substantial-refactor-warranted` verdict from refactoring alongside otherwise-clean reports yields aggregated `minor-cleanup`, not `needs-changes`.
+
 ### 4b. Severity-ordered finding list
 
 Merge per-agent findings into one list, ordered:
@@ -107,14 +112,15 @@ Merge per-agent findings into one list, ordered:
 1. **Block-merge findings** (security, reliability, compliance hard-blocks)
 2. **Production-impact findings** (performance hot-path, scalability replica-coherence, reliability page-worthy)
 3. **Quality findings** (maintainability, testability, coding-conventions structural drift)
-4. **Drift / nits** (style, minor cleanup)
+4. **Refactoring opportunities** (refactoring-reviewer's commit-sized proposals — advisory, ordered by impact ÷ cost)
+5. **Drift / nits** (style, minor cleanup)
 
 For each finding, format:
 ```
 [<severity>] [<reviewer>] <path:line> — <finding> — <fix>
 ```
 
-Deduplicate: if two reviewers flagged the same `path:line` for related reasons, collapse with both reviewer tags.
+Deduplicate: if two reviewers flagged the same `path:line` for related reasons, collapse with both reviewer tags. Common pairs to expect: `[maintainability + refactoring]` (symptom + transformation), `[testability + refactoring]` (extracted function deserves a unit test), `[coding-conventions + refactoring]` (rename to match repo).
 
 ### 4c. Cross-reviewer patterns
 
@@ -124,9 +130,134 @@ When 3+ reviewers flag findings that share a theme (e.g. "this service mixes res
 
 After the aggregated view, include each agent's raw report under a heading. The user may want to drill into a specific reviewer's reasoning without re-running it.
 
-## Step 5: Output
+## Step 5: Persist the review log to `doc/review/`
 
-Write the aggregated report to stdout (chat). Do NOT write a file unless the user explicitly asks. Reviews are conversation artifacts; they go stale and shouldn't pollute the repo.
+Reviews are durable history, not chat artifacts. Always write the aggregated report to a dated file before echoing the summary to chat. The file is what future contributors grep when they want to know "why is this code shaped this way" or "what did we decide about X last quarter".
+
+### File path
+
+```
+doc/review/<YYYY-MM-DD>-<scope-slug>.md
+```
+
+- **Date** — today's date (UTC), `YYYY-MM-DD`.
+- **Scope slug** — kebab-case theme of the change. Examples:
+  - `doc-refresh` — for /refresh-docs follow-ups
+  - `auth-jwt-bearer` — for a feature commit on auth
+  - `audit-handler-impl` — for code-side work on audit
+  - `pr-42` — when the scope is a specific GitHub PR
+- **Disambiguation** — if the path already exists (multiple reviews same day), append the next integer: `2026-05-08-doc-refresh-2.md`.
+
+If `doc/review/` does not yet exist, create it with `mkdir -p doc/review`.
+
+### File template
+
+Write this exact shape — an actionable checklist FIRST so the user can act on it without reading the full record, then the analysis, then the verbatim per-reviewer reports for archival.
+
+```markdown
+# Multi-perspective review — <YYYY-MM-DD> <short-scope>
+
+| | |
+|---|---|
+| **日付** | <YYYY-MM-DD> |
+| **対象ブランチ / PR** | <branch / PR# / specific paths> |
+| **発火元** | </multi-perspective-review or which skill chain> |
+| **変更概要** | <2-3 lines: what changed and why> |
+| **総合判定** | <block-merge / needs-changes / minor-cleanup / ship-it> |
+
+---
+
+## 1. 対応アイテム一覧 (チェックリスト)
+
+### 1.1 doc-only / scope-included — この変更内で対応する
+
+| # | 対応内容 | 検出元 | 重要度 |
+|---|---|---|---|
+| A | <one-line> | <reviewer(s)> | 高 / 中 / 低 |
+| B | ... | ... | ... |
+
+### 1.2 code-side / 別 PR でフォローアップ
+
+| # | 対応内容 | 検出元 | 重要度 |
+|---|---|---|---|
+| H | <one-line> | <reviewer(s)> | ... |
+
+### 1.3 Refactoring proposals (advisory — open follow-up PR)
+
+`refactoring-reviewer` の提案。各項目は単一 commit サイズの transformation。Cost / Test impact 込みで一覧化。
+
+| # | Refactoring | path:line | Cost | Test impact |
+|---|---|---|---|---|
+| R1 | <name> | <path:line> | S / M | none / ... |
+
+---
+
+## 2. 横断パターン (cross-reviewer)
+
+- <theme> — flagged by <reviewers> across <paths>
+
+---
+
+## 3. Top findings (severity-ordered)
+
+```
+[block-merge]      [security]  <path:line> — <finding> — <fix>
+[production-impact][reliability] <path:line> — ...
+...
+```
+
+---
+
+## 4. Per-reviewer reports (verbatim)
+
+9 sub-agent (security / performance / coding-conventions / maintainability / testability / reliability / scalability / compliance / refactoring) を並列 dispatch した結果。各 agent の verbatim 報告を保存する。
+
+### 4.1 Security — `<verdict>`
+
+> <verbatim report>
+
+### 4.2 Performance — `<verdict>`
+
+> ...
+
+### 4.3 Coding conventions — `<verdict>`
+
+> ...
+
+### 4.4 Maintainability — `<verdict>`
+
+> ...
+
+### 4.5 Testability — `<verdict>`
+
+> ...
+
+### 4.6 Reliability — `<verdict>`
+
+> ...
+
+### 4.7 Scalability — `<verdict>`
+
+> ...
+
+### 4.8 Compliance — `<verdict>`
+
+> ...
+
+### 4.9 Refactoring — `<verdict>`
+
+> ...
+```
+
+The actionable checklist (§1) is the load-bearing section — keep it scannable. Group items in §1.1 for "the user can act on this in this conversation/PR" and §1.2 for "needs separate follow-up". Place `refactoring-reviewer`'s proposals in §1.3 — they are advisory and follow a different format (cost / test-impact columns).
+
+### When the file write fails
+
+If `Write` fails (permission, disk full, etc.), surface the error in the chat reply alongside the summary. Don't silently drop the persistence. The chat output is the fallback record; tell the user the file path you tried so they can re-create the file from the chat content if they want.
+
+## Step 6: Echo a condensed summary to chat
+
+After writing the file, output a condensed deliverable to stdout — just enough that the user can decide what to act on without re-opening the file.
 
 Structure:
 
@@ -135,8 +266,21 @@ Structure:
 
 **Verdict:** <block-merge | needs-changes | minor-cleanup | ship-it>
 **Scope:** <one line>
+**Full record:** `doc/review/<YYYY-MM-DD>-<scope-slug>.md`
 
-## Top findings (severity-ordered)
+## 対応アイテム
+
+### doc-only / scope-included
+- A: ...
+- B: ...
+
+### code-side / 別 PR
+- H: ...
+
+### Refactoring proposals (advisory)
+- R1: <one-line> (<path:line>, <cost>)
+
+## Top findings (severity-ordered, top 10)
 
 [block-merge] [security] modules/auth/src/service/login.go:42 — ...
 [production-impact] [reliability] modules/queue/src/route/grpc/server.go:88 — ...
@@ -145,17 +289,9 @@ Structure:
 ## Cross-reviewer patterns
 
 - <pattern> — flagged by <reviewers> across <paths>
-
-## Per-reviewer reports
-
-### Security
-<verbatim>
-
-### Performance
-<verbatim>
-
-... (all 8)
 ```
+
+Do NOT paste all 9 verbatim reports into the chat — those live in the file. Chat output is the index; the file is the record.
 
 ## Failure modes
 
@@ -181,5 +317,10 @@ Structure:
 - `.claude/agents/reliability-reviewer.md`
 - `.claude/agents/scalability-reviewer.md`
 - `.claude/agents/compliance-reviewer.md`
+- `.claude/agents/refactoring-reviewer.md`
 
 If any of these files don't exist, the skill cannot run — flag the missing agent and stop.
+
+## Reference: history directory
+
+- `doc/review/` — review log archive. Each file is a dated snapshot of one `/multi-perspective-review` run. Earliest example: `doc/review/2026-05-08-doc-refresh-multi-perspective.md` (the run that established the format).
