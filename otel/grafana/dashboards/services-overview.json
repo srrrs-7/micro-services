@@ -4,7 +4,7 @@
   "tags": ["go", "otel", "red"],
   "timezone": "",
   "schemaVersion": 41,
-  "version": 1,
+  "version": 2,
   "refresh": "10s",
   "time": { "from": "now-15m", "to": "now" },
   "templating": {
@@ -13,7 +13,7 @@
         "name": "service",
         "type": "query",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "query": "label_values(service_name)",
+        "query": "label_values(go_goroutine_count, service_name)",
         "refresh": 2,
         "includeAll": true,
         "multi": true,
@@ -36,7 +36,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "process_runtime_go_goroutines{service_name=~\"$service\"}",
+          "expr": "go_goroutine_count{service_name=~\"$service\"}",
           "legendFormat": "{{service_name}}",
           "refId": "A"
         }
@@ -47,11 +47,11 @@
     {
       "id": 3,
       "type": "timeseries",
-      "title": "Heap in-use",
+      "title": "Memory in use",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "process_runtime_go_mem_heap_inuse_bytes{service_name=~\"$service\"}",
+          "expr": "go_memory_used_bytes{service_name=~\"$service\"}",
           "legendFormat": "{{service_name}}",
           "refId": "A"
         }
@@ -62,11 +62,11 @@
     {
       "id": 4,
       "type": "timeseries",
-      "title": "GC pauses (rate)",
+      "title": "Allocation rate",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "rate(process_runtime_go_gc_count_total{service_name=~\"$service\"}[1m])",
+          "expr": "rate(go_memory_allocations_total{service_name=~\"$service\"}[1m])",
           "legendFormat": "{{service_name}}",
           "refId": "A"
         }
@@ -125,7 +125,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "sum(rate(rpc_server_duration_milliseconds_count{service_name=~\"$service\"}[1m])) by (service_name, rpc_grpc_status_code)",
+          "expr": "sum(rate(rpc_server_call_duration_seconds_count{service_name=~\"$service\"}[1m])) by (service_name, rpc_grpc_status_code)",
           "legendFormat": "{{service_name}} code={{rpc_grpc_status_code}}",
           "refId": "A"
         }
@@ -140,12 +140,12 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(rpc_server_duration_milliseconds_bucket{service_name=~\"$service\"}[5m])) by (le, service_name, rpc_method))",
+          "expr": "histogram_quantile(0.95, sum(rate(rpc_server_call_duration_seconds_bucket{service_name=~\"$service\"}[5m])) by (le, service_name, rpc_method))",
           "legendFormat": "{{service_name}} {{rpc_method}}",
           "refId": "A"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "gridPos": { "h": 7, "w": 12, "x": 12, "y": 17 }
     }
   ]
