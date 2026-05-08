@@ -113,7 +113,7 @@ When the noop fallback is active (no obs stack), these calls are zero-allocation
 ## Adding a new service
 
 1. In `cmd/<binary>/main.go`, call `utilotel.Init(ctx, "<service-name>")` early in `run()` and defer the returned shutdown alongside other resource teardowns.
-2. **HTTP server:** wire `utilotel.HTTPMiddleware("<service-name>")` via `r.Use(...)` after the chi seam line. The middleware's `SpanNameFormatter` reads `http.Request.Pattern` (populated by chi v5 and stdlib ServeMux 1.22+) so span names land as `"<METHOD> <pattern>"` automatically — no per-router retag middleware needed.
+2. **HTTP server:** wire `utilotel.HTTPMiddleware("<service-name>")` via `r.Use(...)` after the chi seam line. The middleware's `SpanNameFormatter` reads `http.Request.Pattern` (populated by chi v5 and stdlib ServeMux 1.22+) so span names land as `"<METHOD> <pattern>"` automatically — no per-router retag middleware needed. Requests where `r.Pattern == ""` (404s on unmatched routes, or routers older than Go 1.22 / chi v5 that don't populate the field) fall back to the `<service-name>` argument as the span name — expect 404 spans to bucket under the service name rather than a path.
 3. **gRPC server:** add `utilotel.GRPCServerOption()` to `grpc.NewServer(...)` *before* the `ChainUnaryInterceptor` call so the StatsHandler sits outside the existing logging/recovery interceptors.
 4. **Outbound gRPC client:** when calling `utilgrpc.Dial`, prepend `utilotel.GRPCClientOption()` to the option list (see `audit/infra/queueclient/client.go`).
 5. In `compose.yml`, add the service's env block with `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`, the `OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}` interpolation, `OTEL_EXPORTER_OTLP_PROTOCOL: grpc`, and `OTEL_TRACES_SAMPLER`.
@@ -132,6 +132,8 @@ The dashboard's `$service` template variable will pick up the new `service.name`
 
 **"Prometheus has no data even though traces work."** OTel metrics use a periodic exporter (default 60s interval). Wait, generate some traffic, check Prometheus targets at <http://localhost:9090/targets> — `otel-collector:8889` should be UP.
 
+**"Half my pods emit traces, half don't, after I changed the ConfigMap."** Toggling `OTEL_EXPORTER_OTLP_ENDPOINT` (or any `OTEL_*` value) in a ConfigMap does NOT auto-restart the pods reading it. Until each pod is restarted it keeps the env it was started with, leaving the fleet split between OTel-on and OTel-off replicas with no observable signal. After editing a ConfigMap, force a rolling restart on every Deployment that reads it: `kubectl -n <ns> rollout restart deploy/<name>`. The dev path through `make k8s-up` rebuilds + reloads images, which already triggers a roll, so this only bites when ConfigMaps are edited in isolation.
+
 ## Configuration reference
 
 Every binary reads the standard OTEL_* environment variables:
@@ -147,6 +149,8 @@ Every binary reads the standard OTEL_* environment variables:
 | `OTEL_LOG_LEVEL` | Internal SDK log verbosity |
 
 Compose env in `compose.yml` sets these per service; `make obs-up` documents the endpoint to export from the host shell when re-running a service stack.
+
+**PII / retention note on `OTEL_TRACES_SAMPLER`.** Today every service in `compose.yml` and the k8s base ConfigMaps sets `always_on`, meaning 100% of spans are exported. `otelhttp` and `otelgrpc` attach standard semantic-convention attributes — including `net.peer.addr` (client IP) and `http.user_agent` — to every span. Those overlap with the `actor_ip` / `actor_user_agent` fields that `audit_events` (`modules/audit/docs/system-design.md` §5.1, §10.1) classifies as PII, so traces become a parallel store of the same user-attributable data. Tempo's retention is the policy boundary: `emptyDir` in dev (cleared on pod restart, acceptable), but staging / prod overlays MUST attach a PVC with an explicit TTL or a `compactor.compaction.block_retention` setting. When deploying a new environment, decide the trace retention TTL alongside the audit-events retention (365 d) — they are different stores governed by the same data class. For lower-volume staging / prod, switch to `parentbased_traceidratio` with a fractional `OTEL_TRACES_SAMPLER_ARG` to cap PII volume at the SDK rather than relying solely on Tempo retention.
 
 ## Phase roadmap
 
@@ -247,9 +251,6 @@ In-cluster DNS ports:
 
 ```bash
 # Phase 1 / 2 service rebuild — unchanged
-OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 make audit-build
-
-```bash
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 make audit-build
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 make audit-up
 ```
