@@ -13,7 +13,7 @@ A library-only module — no `cmd/`, no `deploy/`, no migrations, no proto. Hold
 3. `src/utilhttp/request.go` — `RequestBody[T]` / `RequestUrlParam[T]` generics. The `Validator` interface is the constraint that lets `T` validate itself.
 4. `src/utilcache/cache.go` — `Cache` wraps `*redis.Client` with a prefix and a uniform TTL. Multiple `Cache` values per service (different prefixes/TTLs) are fine.
 5. `src/utilgrpc/client.go` — `Dial` + functional `Option`s. `Option` is **re-exported** by per-service consumer wrappers (e.g. `audit/src/infra/queueclient/`) as `type Option = utilgrpc.Option` so callers don't import `shared/utilgrpc` directly.
-6. `src/utilotel/{init,http,grpc}.go` — `Init` configures the global TracerProvider + MeterProvider from `OTEL_*` env vars (noop fallback when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset). `HTTPMiddleware` wraps `otelhttp.NewMiddleware`; `GRPCServerOption` returns the StatsHandler; `GRPCClientOption` returns a `utilgrpc.Option`. The package is deliberately chi-free — chi-specific span retag lives in `auth/src/route/middleware/otel.go`. See `otel/README.md` for the dev stack this feeds.
+6. `src/utilotel/{init,http,grpc}.go` — `Init` configures the global TracerProvider + MeterProvider from `OTEL_*` env vars (noop fallback when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset). `HTTPMiddleware` wraps `otelhttp.NewMiddleware` and installs a `SpanNameFormatter` that reads `http.Request.Pattern` (populated by chi v5 and stdlib ServeMux 1.22+) so spans land as `"<METHOD> <pattern>"` without any per-router retag middleware. `GRPCServerOption` returns the StatsHandler; `GRPCClientOption` returns a `utilgrpc.Option`. See `otel/README.md` for the dev stack this feeds.
 
 ## Layout (shared-specific)
 

@@ -84,7 +84,6 @@ Inside the `internal` Docker bridge, services resolve each other by container na
 | `modules/shared/src/utilotel/init.go` | `Init` configures the global TracerProvider + MeterProvider from `OTEL_*` env vars. Falls back to **noop providers** when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset, so dev loops without `make obs-up` stay zero-overhead. Always installs the W3C TraceContext + Baggage propagator. Starts Go runtime metrics. |
 | `modules/shared/src/utilotel/http.go` | `HTTPMiddleware(serverName, opts...)` wraps `otelhttp.NewMiddleware`. Default request filter skips `GET /health`. Override via `WithRequestFilter`. |
 | `modules/shared/src/utilotel/grpc.go` | `GRPCServerOption()` returns `grpc.StatsHandler(otelgrpc.NewServerHandler())` — covers both spans and `rpc.server.*` metrics. `GRPCClientOption()` returns a `utilgrpc.Option` so it composes with the existing dial-option set. |
-| `modules/auth/src/route/middleware/otel.go` | chi-specific `RouteTag()` middleware that retags spans with `RoutePattern()` after the inner handler runs. Lives in `auth` (not `shared`) so `shared/utilotel` stays chi-free. |
 
 Per-binary wiring lives in each `cmd/<binary>/main.go`. The OTel shutdown is invoked **before** DB / cache close so in-flight spans + metrics reach the Collector while the network is still up.
 
@@ -114,7 +113,7 @@ When the noop fallback is active (no obs stack), these calls are zero-allocation
 ## Adding a new service
 
 1. In `cmd/<binary>/main.go`, call `utilotel.Init(ctx, "<service-name>")` early in `run()` and defer the returned shutdown alongside other resource teardowns.
-2. **HTTP server:** wire `utilotel.HTTPMiddleware("<service-name>")` via `r.Use(...)` after the chi seam line. If using chi, also wire a `RouteTag()` middleware (copy from `modules/auth/src/route/middleware/otel.go`).
+2. **HTTP server:** wire `utilotel.HTTPMiddleware("<service-name>")` via `r.Use(...)` after the chi seam line. The middleware's `SpanNameFormatter` reads `http.Request.Pattern` (populated by chi v5 and stdlib ServeMux 1.22+) so span names land as `"<METHOD> <pattern>"` automatically — no per-router retag middleware needed.
 3. **gRPC server:** add `utilotel.GRPCServerOption()` to `grpc.NewServer(...)` *before* the `ChainUnaryInterceptor` call so the StatsHandler sits outside the existing logging/recovery interceptors.
 4. **Outbound gRPC client:** when calling `utilgrpc.Dial`, prepend `utilotel.GRPCClientOption()` to the option list (see `audit/infra/queueclient/client.go`).
 5. In `compose.yml`, add the service's env block with `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`, the `OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}` interpolation, `OTEL_EXPORTER_OTLP_PROTOCOL: grpc`, and `OTEL_TRACES_SAMPLER`.
@@ -283,7 +282,7 @@ Recorded here so future "why is this not done differently?" questions land on th
 
 - **Push (services → Collector → Prometheus scrape) vs. pull (services expose `/metrics`):** push, because gRPC services would otherwise need a second HTTP listener purely for `/metrics`, and we want to keep `prometheus/client_golang` out of the dependency tree (single SDK = OTel only). The cost is a HA-Collector requirement in prod (Phase 4).
 - **`shared/utilotel` vs. duplicate per-service init:** shared, mirroring the existing `utilXxx` family. Single SDK version across the monorepo; no per-service drift.
-- **chi route-pattern retag in `auth/route/middleware/` not `shared/utilotel`:** keeps `shared` chi-free. Only auth uses chi today.
+- **Span-name formatting via `http.Request.Pattern` in `shared/utilotel`, not a chi-specific middleware:** chi v5 and stdlib ServeMux 1.22+ both populate `r.Pattern` during routing, so a single `SpanNameFormatter` in `utilotel.HTTPMiddleware` handles both routers. The earlier `auth/route/middleware/otel.go` retag middleware was deleted alongside the chi v5 upgrade — `shared/utilotel` stays chi-free without giving up route-pattern span names.
 - **`filter/healthcheck` at the Collector, not the SDK:** single point of filtering for both traces and metrics. SDK-level filters would have to be configured per binary.
 - **Opt-in profile (`obs`) instead of always-on:** `make audit` should not pay the cost of starting Grafana for every iteration. The two-step dance (`make obs-up` → re-run service stack with env) is a small ergonomics tax for a big resource win.
 - **Logs deferred:** filelog vs. otelslog is a real fork — one is host-side and zero-code, the other is in-process and gives trace ID correlation. Choosing too early would foreclose the better answer; the pipeline shape stays the same regardless.
