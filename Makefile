@@ -292,6 +292,24 @@ k8s-status: ## Show pods, services, and jobs across all service namespaces
 		kubectl -n $$ns get pods,svc,jobs -o wide 2>&1 || true; \
 	done
 
+k8s-debug-grpc: ## Run an ephemeral grpcurl container to debug gRPC services (usage: make k8s-debug-grpc [SVC=queue-api.queue])
+	@target=$(SVC); \
+	if [ -z "$$target" ]; then target="queue-api.queue"; fi; \
+	svc=$${target%%.*}; \
+	ns=$${target#*.}; \
+	echo "==> Starting ephemeral grpcurl container in namespace $$ns to debug $$svc:8080..."; \
+	kubectl run grpc-debug-$(shell date +%s) -it --rm --image=fullstorydev/grpcurl --restart=Never -n $$ns -- -plaintext $$svc:8080 list
+
+k8s-debug-http: ## Run an ephemeral curl container to debug HTTP services (usage: make k8s-debug-http [SVC=auth-api.auth] [REQ_PATH=/health])
+	@target=$(SVC); \
+	if [ -z "$$target" ]; then target="auth-api.auth"; fi; \
+	svc=$${target%%.*}; \
+	ns=$${target#*.}; \
+	req_path=$(REQ_PATH); \
+	if [ -z "$$req_path" ]; then req_path="/health"; fi; \
+	echo "==> Starting ephemeral curl container in namespace $$ns to debug http://$$svc:8080$$req_path..."; \
+	kubectl run http-debug-$(shell date +%s) -it --rm --image=curlimages/curl --restart=Never -n $$ns -- -i http://$$svc:8080$$req_path
+
 k8s-down: ## Delete the dev kustomization (kind cluster stays up)
 	-kubectl delete -k deploy/k8s/dev --ignore-not-found
 
