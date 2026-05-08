@@ -3,9 +3,8 @@ package route
 import (
 	"net/http"
 
-	"github.com/go-chi/chi"
+	"github.com/go-chi/chi/v5"
 
-	"auth/route/middleware"
 	"shared/utilotel"
 )
 
@@ -22,7 +21,6 @@ func (h *handler) Router() *chi.Mux {
 
 	r.Use(r.Middlewares()...)
 	r.Use(utilotel.HTTPMiddleware("auth-api"))
-	r.Use(middleware.RouteTag())
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {})
 
