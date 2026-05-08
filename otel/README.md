@@ -151,10 +151,41 @@ Compose env in `compose.yml` sets these per service; `make obs-up` documents the
 
 ## Phase roadmap
 
-- **Phase 1 (this PR):** stack up; traces + metrics flow end-to-end; logs pipeline configured but no producer (slog stays on stdout).
-- **Phase 2:** richer dashboards (split HTTP / gRPC / per-service views), alert rules under `otel/prometheus/rules/`, sampling tuning.
+- **Phase 1:** stack up; traces + metrics flow end-to-end; logs pipeline configured but no producer (slog stays on stdout).
+- **Phase 2 (this PR):** dashboards split into three focused views (`go-runtime`, `http-red`, `grpc-red`) using OTel-semconv-current metric names (`go_*`, `rpc_server_call_duration_seconds_*`, `http_server_request_duration_seconds_*`); recording rules for RED quantities under `otel/prometheus/rules/recording.yml`; alert rules under `otel/prometheus/rules/alerts.yml` covering ServiceDown / High{HTTP,gRPC}{ErrorRate,LatencyP95}. Prometheus runs with `--web.enable-lifecycle` so reloading rules is `curl -X POST http://localhost:9090/-/reload`.
 - **Phase 3:** logs producer — choose between `filelog` receiver (compose-local, no code change) and `otelslog` bridge in `shared/utillog` (trace ID auto-injection, code change). Wire chosen path into the `logs` pipeline.
 - **Phase 4:** Kubernetes overlays under `deploy/k8s/observability/{base,overlays/dev}/` mirroring the per-service module pattern, in a new `observability` namespace. Same Collector / Prometheus / Tempo / Loki / Grafana shape; image tags `:dev`, configmap-mounted configs, Downward API for `k8s.pod.name` resource attributes.
+
+## Phase 2 — recording + alert rules + split dashboards
+
+After pulling Phase 2:
+
+```bash
+# Apply rule + Prometheus config changes — rules live in otel/prometheus/rules/
+docker rm -f prometheus
+docker-compose -f compose.yml -f otel/compose.yml up -d prometheus
+
+# (Subsequent rule edits) reload without restart
+curl -X POST http://localhost:9090/-/reload
+
+# Verify rules loaded
+curl -fsS http://localhost:9090/api/v1/rules | jq '.data.groups[].name'
+# expect: rpc.server.recordings, http.server.recordings,
+#         service.availability, rpc.server.health, http.server.health
+
+# Verify alerts visible
+curl -fsS http://localhost:9090/api/v1/alerts | jq '.data.alerts | length'
+```
+
+Grafana auto-reloads dashboards every 30s via the dashboards provisioning provider — no Grafana restart needed when dashboard JSON changes. Three dashboards now appear under "Dashboards":
+
+| UID | Title | Audience |
+|---|---|---|
+| `go-runtime` | Go Runtime | Per-service goroutines / memory / GC behaviour |
+| `http-red` | HTTP RED (auth) | auth-api request rate / 4xx-5xx errors / p50-p95-p99 / top routes |
+| `grpc-red` | gRPC RED (audit / queue) | RPC rate by method / errors by status code (excluding OK) / latency quantiles / top slow methods |
+
+**Alerts and dev stubs.** `HighGRPCErrorRate` deliberately excludes `rpc_grpc_status_code="12"` (UNIMPLEMENTED) so audit's Phase 1 stub handlers don't page during dev. Drop the exclusion once real handlers land — see `otel/prometheus/rules/alerts.yml` for the comment that calls this out.
 
 ## Design rationale
 

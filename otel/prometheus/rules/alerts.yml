@@ -1,0 +1,66 @@
+# Alert rules. All start as `severity: warning` for dev — when the obs
+# stack ships to staging, copy and re-tag a `severity: critical` variant
+# with stricter thresholds. Annotations include `summary` for one-line
+# pager view; expand with `description` once Alertmanager is wired.
+#
+# Status code reminder (gRPC):
+#   0 = OK, 12 = UNIMPLEMENTED. Phase 1 audit handlers are stubs that
+#   return UNIMPLEMENTED — exclude code 12 from error-rate alerts so the
+#   stub state doesn't page during normal dev. Drop the exclusion once
+#   real handlers land (audit/docs/system-design.md §13).
+
+groups:
+  - name: service.availability
+    rules:
+      - alert: ServiceDown
+        # absent_over_time fires when no goroutine sample is seen for the
+        # service over the last 5 minutes. Goroutines is a free, always-on
+        # signal from the runtime instrumentation, so this is a reliable
+        # liveness proxy without per-service /health scraping.
+        expr: absent_over_time(go_goroutine_count[5m])
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Service has not reported metrics for 5m"
+
+  - name: rpc.server.health
+    rules:
+      - alert: HighGRPCErrorRate
+        expr: |
+          (
+            sum by (service_name) (rate(rpc_server_call_duration_seconds_count{rpc_grpc_status_code!~"0|12"}[5m]))
+            /
+            sum by (service_name) (rate(rpc_server_call_duration_seconds_count[5m]))
+          ) > 0.10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service_name }} gRPC error rate >10% over 5m (excluding OK and UNIMPLEMENTED)"
+
+      - alert: HighGRPCLatencyP95
+        expr: service:rpc_server_call_duration_seconds:p95_5m > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service_name }} gRPC p95 >1s"
+
+  - name: http.server.health
+    rules:
+      - alert: HighHTTPErrorRate
+        expr: service:http_server_request_5xx:rate1m / service:http_server_request_duration_seconds:rate1m > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service_name }} HTTP 5xx rate >5% over 5m"
+
+      - alert: HighHTTPLatencyP95
+        expr: service:http_server_request_duration_seconds:p95_5m > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service_name }} HTTP p95 >500ms"

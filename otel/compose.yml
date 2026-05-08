@@ -30,8 +30,12 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=24h
+      # web.enable-lifecycle lets `curl -X POST /-/reload` reload rules
+      # without a container restart — convenient for Phase 2 iteration.
+      - --web.enable-lifecycle
     volumes:
       - ./otel/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./otel/prometheus/rules:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus
     ports:
       - "9090:9090"

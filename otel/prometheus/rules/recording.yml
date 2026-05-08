@@ -1,0 +1,42 @@
+# Recording rules — pre-compute the RED signal per service so dashboards
+# (and alerts) read from short, fast names instead of repeating the same
+# rate() / histogram_quantile() expressions.
+#
+# Naming follows the Prometheus convention `level:metric:operation`:
+#   - level     = aggregation key (`service` here)
+#   - metric    = base metric name
+#   - operation = aggregation kind (rate1m, p95_5m, etc.)
+
+groups:
+  - name: rpc.server.recordings
+    interval: 30s
+    rules:
+      - record: service:rpc_server_call_duration_seconds:rate1m
+        expr: sum by (service_name) (rate(rpc_server_call_duration_seconds_count[1m]))
+
+      # Error count excludes OK (0). Unimplemented (12) is intentionally
+      # included here so a real "we forgot to implement this" rate stays
+      # visible during Phase 1 stub stages — alerting filters it back out.
+      - record: service:rpc_server_call_errors:rate1m
+        expr: sum by (service_name) (rate(rpc_server_call_duration_seconds_count{rpc_grpc_status_code!="0"}[1m]))
+
+      - record: service:rpc_server_call_duration_seconds:p95_5m
+        expr: histogram_quantile(0.95, sum by (le, service_name) (rate(rpc_server_call_duration_seconds_bucket[5m])))
+
+      - record: service:rpc_server_call_duration_seconds:p99_5m
+        expr: histogram_quantile(0.99, sum by (le, service_name) (rate(rpc_server_call_duration_seconds_bucket[5m])))
+
+  - name: http.server.recordings
+    interval: 30s
+    rules:
+      - record: service:http_server_request_duration_seconds:rate1m
+        expr: sum by (service_name) (rate(http_server_request_duration_seconds_count[1m]))
+
+      - record: service:http_server_request_5xx:rate1m
+        expr: sum by (service_name) (rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[1m]))
+
+      - record: service:http_server_request_duration_seconds:p95_5m
+        expr: histogram_quantile(0.95, sum by (le, service_name) (rate(http_server_request_duration_seconds_bucket[5m])))
+
+      - record: service:http_server_request_duration_seconds:p99_5m
+        expr: histogram_quantile(0.99, sum by (le, service_name) (rate(http_server_request_duration_seconds_bucket[5m])))
