@@ -291,9 +291,10 @@ make k8s-cluster-delete  # kind クラスタを消す
 1. `kind get clusters` → なければ `dev` クラスタを作成
 2. 5つの `:dev` イメージをビルド（`audit-api`, `audit-worker`, `auth-api`, `queue-api`, `migrator`）
 3. それぞれを `kind load docker-image`
-4. `kubectl apply -k deploy/k8s/dev`
-5. Postgres × 2 / Redis / migrate Job × 2 が ready/complete になるまで待機
-6. `make k8s-status` を表示
+4. `make istio-up` — Gateway API CRDs（istiod が起動する前に必須）→ `istioctl install --set profile=ambient` → istiod / ztunnel / istio-cni-node の rollout 完了待ち
+5. `kubectl apply -k deploy/k8s/dev`
+6. Postgres × 2 / Redis / migrate Job × 2、および Istio が auto-provision する auth gateway Pod が ready/complete になるまで待機
+7. `make k8s-status` を表示
 
 期待される定常状態:
 
@@ -301,7 +302,10 @@ make k8s-cluster-delete  # kind クラスタを消す
 - `auth-db`, `audit-db`: 1台 Running 1/1 Ready
 - `auth-cache`: 1台 Running 1/1 Ready
 - `auth-migrate`, `audit-migrate`: Completed
+- `auth-gateway-istio`（Istio が auto-provision する Envoy Gateway Pod）: 1台 Running 1/1 Ready（`auth` ns）
 - `audit-worker`: **CrashLoopBackOff**（stub バイナリで `fmt.Println` 後 exit。バグではない）
+- `istio-system` ns: `istiod`（Deployment）/ `ztunnel`（DaemonSet）/ `istio-cni-node`（DaemonSet）が Ready
+- `observability` ns: `otel-collector` / `prometheus` / `tempo` / `loki` / `grafana` が Running
 
 ### 12.2 devcontainer 特有の初回セットアップ
 

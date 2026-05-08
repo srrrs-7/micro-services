@@ -39,7 +39,6 @@ modules/auth/
     │   ├── login.go                handler 実装
     │   ├── request/                ozzo-validation の Validate() 付き request struct
     │   └── middleware/auth.go      Bearer token middleware (実装中)
-    ├── testutil/                   テストヘルパー置き場 (現状空)
     └── infra/database/
         ├── migrations/             Atlas
         ├── queries/login.sql       sqlc 入力 (現状 GetUser のみ)
