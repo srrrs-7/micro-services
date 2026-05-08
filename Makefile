@@ -47,9 +47,9 @@ help: ## Show this help
 	@printf '\n\033[1mServices (<svc> ∈ $(SERVICES))\033[0m\n'
 	@printf '  \033[36m%-22s\033[0m %s\n' \
 		'<svc>'             'build + up + migrate' \
-		'<svc>-up'          'docker compose up the stack' \
-		'<svc>-build'       'docker compose build the images' \
-		'<svc>-down'        'docker compose down the stack' \
+		'<svc>-up'          'docker-compose up the stack' \
+		'<svc>-build'       'docker-compose build the images' \
+		'<svc>-down'        'docker-compose down the stack' \
 		'<svc>-migrate'     'Atlas migrate hash + apply' \
 		'<svc>-new-migrate' 'create a new Atlas migration' \
 		'<svc>-sqlc-gen'    'sqlc generate'
@@ -124,22 +124,24 @@ hooks: hooks-install ## Alias for hooks-install
 
 ##@ Observability (OTel Collector + Prometheus + Grafana + Tempo + Loki)
 
-# Run only the obs services. To send telemetry from your service stack,
-# re-run the per-service stack with OTEL_EXPORTER_OTLP_ENDPOINT exported —
-# obs-up prints the exact command after starting.
+# The obs stack lives in otel/compose.yml; load it via -f alongside the
+# root compose.yml. To send telemetry from your service stack, re-run the
+# per-service stack with OTEL_EXPORTER_OTLP_ENDPOINT exported — obs-up
+# prints the exact command after starting.
 OBS_OTLP_ENDPOINT := http://otel-collector:4317
 OBS_SERVICES      := otel-collector prometheus grafana tempo loki
+OBS_COMPOSE_FILES := -f compose.yml -f otel/compose.yml
 
 .PHONY: obs-up obs-down obs-logs obs-status
 
 obs-up: ## Bring up the observability stack (does NOT touch service stacks)
-	docker compose --profile obs up -d $(OBS_SERVICES)
+	docker-compose $(OBS_COMPOSE_FILES) up -d $(OBS_SERVICES)
 	@echo ""
 	@echo "==> Obs stack is up."
-	@echo "    Grafana   http://localhost:3000  (anonymous Admin)"
+	@echo "    Grafana    http://localhost:3000  (anonymous Admin)"
 	@echo "    Prometheus http://localhost:9090"
-	@echo "    Tempo     http://localhost:3200"
-	@echo "    Loki      http://localhost:3100"
+	@echo "    Tempo      http://localhost:3200"
+	@echo "    Loki       http://localhost:3100"
 	@echo ""
 	@echo "==> To send telemetry, recreate your service stack with the"
 	@echo "    OTLP endpoint exported, e.g.:"
@@ -148,14 +150,14 @@ obs-up: ## Bring up the observability stack (does NOT touch service stacks)
 	@echo ""
 
 obs-down: ## Stop & remove the obs stack containers (data volumes preserved)
-	docker compose stop  $(OBS_SERVICES)
-	docker compose rm -f $(OBS_SERVICES)
+	docker-compose $(OBS_COMPOSE_FILES) stop  $(OBS_SERVICES)
+	docker-compose $(OBS_COMPOSE_FILES) rm -f $(OBS_SERVICES)
 
 obs-logs: ## Tail otel-collector logs
-	docker compose logs -f otel-collector
+	docker-compose $(OBS_COMPOSE_FILES) logs -f otel-collector
 
 obs-status: ## Show obs container status
-	@docker compose --profile obs ps $(OBS_SERVICES)
+	@docker-compose $(OBS_COMPOSE_FILES) ps $(OBS_SERVICES)
 
 ##@ Docker hygiene
 
@@ -264,20 +266,20 @@ service_targets := $(SERVICES) \
 $(SERVICES): %: %-build %-up %-migrate
 
 $(SERVICES:%=%-up): %-up:
-	docker compose up -d $($*_compose_up)
+	docker-compose up -d $($*_compose_up)
 
 $(SERVICES:%=%-build): %-build:
-	docker compose build $($*_compose_up)
+	docker-compose build $($*_compose_up)
 
 $(SERVICES:%=%-down): %-down:
-	docker compose down $($*_compose_down)
+	docker-compose down $($*_compose_down)
 
 $(SERVICES:%=%-new-migrate): %-new-migrate:
-	docker compose run --rm migrator migrate new --dir $(migrate_dir)
+	docker-compose run --rm migrator migrate new --dir $(migrate_dir)
 
 $(SERVICES:%=%-migrate): %-migrate:
-	docker compose run --rm migrator migrate hash --dir $(migrate_dir)
-	docker compose run --rm migrator migrate apply --url $(migrate_url) --dir $(migrate_dir)
+	docker-compose run --rm migrator migrate hash --dir $(migrate_dir)
+	docker-compose run --rm migrator migrate apply --url $(migrate_url) --dir $(migrate_dir)
 
 $(SERVICES:%=%-sqlc-gen): %-sqlc-gen:
 	cd modules/$*/src/infra/database && sqlc generate

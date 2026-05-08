@@ -1,9 +1,7 @@
-include:
-  - otel/compose.yml
-
 # OTEL_EXPORTER_OTLP_ENDPOINT is interpolated from the host shell so the
-# default (unset → empty) keeps utilotel.Init in noop mode. `make obs-up`
-# prints the command to re-run service stacks with this set.
+# default (unset → empty) keeps utilotel.Init in noop mode. The obs stack
+# lives in otel/compose.yml; the obs-* Make targets pull it in via
+# `-f compose.yml -f otel/compose.yml`.
 
 services:
   migrator:

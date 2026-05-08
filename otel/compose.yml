@@ -1,13 +1,14 @@
-# Observability stack — included by the root compose.yml. All services run
-# under `profiles: [obs]`, so they only start when the user explicitly opts
-# in via `make obs-up` (i.e. they do not affect `make audit` / `make auth`).
+# Observability stack. Loaded only by the obs-* Make targets via
+# `-f compose.yml -f otel/compose.yml` — `make audit` / `make auth` never
+# see this file, so opting in / out is a property of the Make recipe, not
+# Compose profiles. (Profiles were dropped to keep docker-compose v1.x
+# compatibility — older v1 binaries do not parse `profiles:`.)
 #
 # Networks: every service joins the `internal` bridge defined in the root
-# compose.yml so service-to-service DNS (otel-collector, prometheus, tempo,
-# loki, grafana) resolves.
+# compose.yml. With multi-file `-f`, that network is visible here without
+# being redeclared.
 services:
   otel-collector:
-    profiles: [obs]
     image: otel/opentelemetry-collector-contrib:0.117.0
     container_name: otel-collector
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
@@ -23,14 +24,12 @@ services:
       - loki
 
   prometheus:
-    profiles: [obs]
     image: prom/prometheus:v3.0.1
     container_name: prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=24h
-      - --enable-feature=otlp-write-receiver
     volumes:
       - ./otel/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
@@ -39,7 +38,6 @@ services:
     networks: [internal]
 
   tempo:
-    profiles: [obs]
     image: grafana/tempo:2.6.1
     container_name: tempo
     command: ["-config.file=/etc/tempo.yaml"]
@@ -52,7 +50,6 @@ services:
     networks: [internal]
 
   loki:
-    profiles: [obs]
     image: grafana/loki:3.3.2
     container_name: loki
     command: ["-config.file=/etc/loki/loki.yaml"]
@@ -65,7 +62,6 @@ services:
     networks: [internal]
 
   grafana:
-    profiles: [obs]
     image: grafana/grafana:11.4.0
     container_name: grafana
     environment:

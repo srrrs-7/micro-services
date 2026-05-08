@@ -1,6 +1,6 @@
 # Observability stack (`otel/`)
 
-Local OpenTelemetry-native observability for the audit / auth / queue services. Brings up an OTel Collector + Prometheus + Grafana + Tempo + Loki stack as a Compose `include` under `profiles: [obs]` — opt-in, isolated from the per-service `make audit` / `make auth` flows. The same shape lifts cleanly into Kubernetes (Phase 4).
+Local OpenTelemetry-native observability for the audit / auth / queue services. Brings up an OTel Collector + Prometheus + Grafana + Tempo + Loki stack as a separate Compose file (`otel/compose.yml`) loaded only by the `make obs-*` targets — opt-in, isolated from the per-service `make audit` / `make auth` flows. The same shape lifts cleanly into Kubernetes (Phase 4).
 
 For the **why** behind these choices (push-via-Collector, `shared/utilotel` placement, opt-in profile, etc.) see the design discussion that produced this stack — the short version is captured below in [Design rationale](#design-rationale).
 
@@ -123,9 +123,9 @@ The dashboard's `$service` template variable will pick up the new `service.name`
 
 ## Troubleshooting
 
-**"I see no traces in Grafana."** Did you re-run your service stack with `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317`? `make obs-up` only starts the obs containers — services started without that env var are running with `utilotel` in noop mode. Check via `docker compose exec audit-api env | grep OTEL`.
+**"I see no traces in Grafana."** Did you re-run your service stack with `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317`? `make obs-up` only starts the obs containers — services started without that env var are running with `utilotel` in noop mode. Check via `docker exec audit-api env | grep OTEL`.
 
-**"`make obs-up` succeeds but Grafana shows datasource errors."** Run `make obs-status`; if any container is in `Restarting`, check `docker compose logs <svc>`. Tempo and Loki sometimes fail on first start with permission errors on the named volume — `docker compose down --volumes` then `make obs-up` resets them.
+**"`make obs-up` succeeds but Grafana shows datasource errors."** Run `make obs-status`; if any container is in `Restarting`, check `docker-compose -f compose.yml -f otel/compose.yml logs <svc>`. Tempo and Loki sometimes fail on first start with permission errors on the named volume — `docker-compose -f compose.yml -f otel/compose.yml down --volumes` then `make obs-up` resets them.
 
 **"Health check spans dominate Tempo."** They shouldn't — the Collector's `filter/healthcheck` processor drops `GET /health` (HTTP) and `grpc.health.v1.Health/Check`/`Watch` (gRPC). If you're seeing them, your code path attaches a different `http.route` attribute or names the gRPC method differently — adjust `otel/collector/config.yaml` accordingly.
 
