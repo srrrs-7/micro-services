@@ -153,7 +153,7 @@ Compose env in `compose.yml` sets these per service; `make obs-up` documents the
 
 - **Phase 1:** stack up; traces + metrics flow end-to-end; logs pipeline configured but no producer (slog stays on stdout).
 - **Phase 2 (this PR):** dashboards split into three focused views (`go-runtime`, `http-red`, `grpc-red`) using OTel-semconv-current metric names (`go_*`, `rpc_server_call_duration_seconds_*`, `http_server_request_duration_seconds_*`); recording rules for RED quantities under `otel/prometheus/rules/recording.yml`; alert rules under `otel/prometheus/rules/alerts.yml` covering ServiceDown / High{HTTP,gRPC}{ErrorRate,LatencyP95}. Prometheus runs with `--web.enable-lifecycle` so reloading rules is `curl -X POST http://localhost:9090/-/reload`.
-- **Phase 3 (this PR):** logs producer wired via the **otelslog bridge** path. `shared/utilotel.Init` now also configures a LoggerProvider with an OTLP gRPC log exporter, then wraps the slog default handler with a tee that fans out to both stdout JSON (existing behaviour) and the OTel log SDK. Trace context on the call site (`slog.InfoContext(ctx, ...)`) is auto-attached as `trace_id` / `span_id` record attributes by the bridge, so Tempo→Loki correlation works end-to-end. The Collector logs pipeline is unchanged from Phase 1 (already shipped to Loki); no Collector / Loki config changes were needed.
+- **Phase 3 (deferred):** the otelslog bridge path was wired but disabled after `go.opentelemetry.io/otel/sdk/log` v0.19 segfaulted inside its `sync.Pool.getSlow` path on the first attribute-bearing log record under Go 1.26.2 (audit-api crashed on the first interceptor log line). The wiring still exists in code (`shared/utilotel/slog.go` teeHandler + `installSlogBridge`) but `Init` no longer installs it. Logs flow only to stdout via `shared/utillog` until we either bump sdk/log to a stable release or pivot to a `filelog` receiver in the Collector. The Collector / Loki side remains ready — only the producer is paused. The `slog.InfoContext` change to interceptors stays (cheap, ctx-aware logging is good practice on its own).
 - **Phase 4:** Kubernetes overlays under `deploy/k8s/observability/{base,overlays/dev}/` mirroring the per-service module pattern, in a new `observability` namespace. Same Collector / Prometheus / Tempo / Loki / Grafana shape; image tags `:dev`, configmap-mounted configs, Downward API for `k8s.pod.name` resource attributes.
 
 ## Phase 2 — recording + alert rules + split dashboards
@@ -187,9 +187,16 @@ Grafana auto-reloads dashboards every 30s via the dashboards provisioning provid
 
 **Alerts and dev stubs.** `HighGRPCErrorRate` deliberately excludes `rpc_grpc_status_code="12"` (UNIMPLEMENTED) so audit's Phase 1 stub handlers don't page during dev. Drop the exclusion once real handlers land — see `otel/prometheus/rules/alerts.yml` for the comment that calls this out.
 
-## Phase 3 — logs via the otelslog bridge
+## Phase 3 — paused
 
-After pulling Phase 3, rebuild the affected service stacks so the new SDK code paths take effect:
+The otelslog bridge was disabled after a SIGSEGV inside `sdk/log v0.19`'s `sync.Pool` path crashed every audit-api on the first attribute-bearing log record. The producer side is reverted; the rest (Loki container, Grafana datasource, Collector logs pipeline, slog tee handler scaffold, `slog.InfoContext` call sites) stays in place so re-enabling is one Init function edit away.
+
+To re-attempt: bump `go.opentelemetry.io/otel/sdk/log`, `go.opentelemetry.io/otel/log`, and `go.opentelemetry.io/contrib/bridges/otelslog` to a release that includes the upstream Pool fix (track the project's issue tracker for the regression), then restore the LoggerProvider construction and `installSlogBridge(serviceName)` call inside `shared/utilotel.Init`. Re-add `lp.Shutdown(sctx)` to the returned shutdown chain. No service-side change is required — the call sites already use `slog.InfoContext`.
+
+The fallback documented earlier remains valid:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 make audit-build
 
 ```bash
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 make audit-build

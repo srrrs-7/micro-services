@@ -17,14 +17,10 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
-	logglobal "go.opentelemetry.io/otel/log/global"
-	lognoop "go.opentelemetry.io/otel/log/noop"
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/propagation"
-	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -57,7 +53,6 @@ func Init(ctx context.Context, serviceName string) (func(context.Context) error,
 	if os.Getenv(EnvOTLPEndpoint) == "" {
 		otel.SetTracerProvider(tracenoop.NewTracerProvider())
 		otel.SetMeterProvider(metricnoop.NewMeterProvider())
-		logglobal.SetLoggerProvider(lognoop.NewLoggerProvider())
 		return func(context.Context) error { return nil }, nil
 	}
 
@@ -98,24 +93,17 @@ func Init(ctx context.Context, serviceName string) (func(context.Context) error,
 		return nil, fmt.Errorf("utilotel: start runtime metrics: %v", err)
 	}
 
-	logExp, err := otlploggrpc.New(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("utilotel: otlp log exporter: %v", err)
-	}
-	lp := sdklog.NewLoggerProvider(
-		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)),
-		sdklog.WithResource(res),
-	)
-	logglobal.SetLoggerProvider(lp)
-
-	// Wrap the slog default so every slog.Info / Error also flows through
-	// the OTel log SDK → Collector → Loki. Tracecontext on the call site
-	// gets auto-attached as trace_id / span_id by the otelslog bridge.
-	installSlogBridge(serviceName)
+	// Phase 3 (logs via otelslog bridge) is on hold: go.opentelemetry.io/
+	// otel/sdk/log@v0.19 segfaults inside its sync.Pool.getSlow path on
+	// the first attribute-bearing record under Go 1.26.2. Logs continue
+	// to flow to stdout via shared/utillog; Loki ingest sits idle until
+	// either sdk/log stabilises or we pivot to a filelog receiver.
+	// installSlogBridge (shared/utilotel/slog.go) and the teeHandler are
+	// kept in tree as the wiring that re-attempts the bridge will use.
 
 	return func(ctx context.Context) error {
 		sctx, cancel := context.WithTimeout(ctx, shutdownTimeout)
 		defer cancel()
-		return errors.Join(tp.Shutdown(sctx), mp.Shutdown(sctx), lp.Shutdown(sctx))
+		return errors.Join(tp.Shutdown(sctx), mp.Shutdown(sctx))
 	}, nil
 }
