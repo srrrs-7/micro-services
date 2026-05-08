@@ -154,7 +154,7 @@ Compose env in `compose.yml` sets these per service; `make obs-up` documents the
 - **Phase 1:** stack up; traces + metrics flow end-to-end; logs pipeline configured but no producer (slog stays on stdout).
 - **Phase 2 (this PR):** dashboards split into three focused views (`go-runtime`, `http-red`, `grpc-red`) using OTel-semconv-current metric names (`go_*`, `rpc_server_call_duration_seconds_*`, `http_server_request_duration_seconds_*`); recording rules for RED quantities under `otel/prometheus/rules/recording.yml`; alert rules under `otel/prometheus/rules/alerts.yml` covering ServiceDown / High{HTTP,gRPC}{ErrorRate,LatencyP95}. Prometheus runs with `--web.enable-lifecycle` so reloading rules is `curl -X POST http://localhost:9090/-/reload`.
 - **Phase 3 (deferred):** the otelslog bridge path was attempted but every audit-api crashed with a SIGSEGV inside `go.opentelemetry.io/otel/sdk/log` v0.19's `sync.Pool.getSlow` on the first attribute-bearing log record (Go 1.26.2). The bridge wiring + scaffold (`shared/utilotel/slog.go`) was reverted; logs continue to flow only to stdout via `shared/utillog`. The Collector / Loki side remains ready (Loki container, datasource, and Collector logs pipeline are still provisioned). The `slog.InfoContext` switch in the gRPC interceptors stayed — ctx-aware logging is net-positive on its own. Re-attempt path: wait for an upstream sdk/log release with the Pool fix, re-add a `LoggerProvider` + small slog bridge inside `Init`, and restore `lp.Shutdown` to the cleanup chain. Alternative: pivot to a `filelog` receiver tailing `/var/lib/docker/containers/*/*.log` on the Collector — code-change-free but loses inline trace_id correlation unless the JSON body carries it.
-- **Phase 4:** Kubernetes overlays under `deploy/k8s/observability/{base,overlays/dev}/` mirroring the per-service module pattern, in a new `observability` namespace. Same Collector / Prometheus / Tempo / Loki / Grafana shape; image tags `:dev`, configmap-mounted configs, Downward API for `k8s.pod.name` resource attributes.
+- **Phase 4 (this PR):** Kubernetes manifests for the obs stack under `otel/k8s/{base,overlays/dev}/` (chose `otel/k8s/` over `deploy/k8s/observability/` so kustomize's load-restriction sandbox doesn't block the `configMapGenerator` references back into `otel/<component>/*`). New `observability` namespace; one Deployment + Service per component (collector / prometheus / tempo / loki / grafana). The 8 ConfigMaps are generated from the existing `otel/` config tree — single source of truth across `make obs-up` (Compose) and `make k8s-up` (kind). Service-side `OTEL_*` env vars are now set in each module's k8s ConfigMap pointing at `otel-collector.observability.svc.cluster.local:4317`; remove `OTEL_EXPORTER_OTLP_ENDPOINT` from the ConfigMap to disable telemetry from a given service if obs is intentionally down in that env.
 
 ## Phase 2 — recording + alert rules + split dashboards
 
@@ -198,6 +198,53 @@ The otelslog bridge crashed every audit-api on the first attribute-bearing log r
 When sdk/log ships a fix (or we pivot to a `filelog` receiver), the re-enable is small: construct a `LoggerProvider` + `BatchProcessor` over `otlploggrpc.New(ctx)` inside `Init`, install a tee that wraps the existing slog default with `otelslog.NewHandler(serviceName)`, and append `lp.Shutdown(sctx)` to the cleanup. The previous attempt's deletion lives in git (commit removing `utilotel/slog.go`) for reference.
 
 The Phase 1 / 2 / 4 stack is unaffected.
+
+```bash
+# Phase 1 / 2 service rebuild — unchanged
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 make audit-build
+```
+
+## Phase 4 — Kubernetes (kind)
+
+The same Collector + Prometheus + Tempo + Loki + Grafana stack runs on the local kind cluster as part of `make k8s-up`. Layout:
+
+```
+otel/k8s/
+├── base/
+│   ├── kustomization.yaml          # configMapGenerator pulls otel/<comp>/*
+│   ├── namespace.yaml              # `observability`
+│   ├── collector.yaml              # Deployment + Service
+│   ├── prometheus.yaml             # Deployment + Service (emptyDir)
+│   ├── tempo.yaml                  # ditto
+│   ├── loki.yaml                   # ditto
+│   └── grafana.yaml                # ditto
+└── overlays/
+    └── dev/kustomization.yaml      # passthrough; staging/prod overlays go here
+```
+
+`deploy/k8s/dev/kustomization.yaml` references `../../../otel/k8s/overlays/dev`, so `kubectl apply -k deploy/k8s/dev` brings up the obs stack alongside audit / auth / queue. `make k8s-apply` invokes `kubectl kustomize --load-restrictor=LoadRestrictionsNone` so the configMapGenerator can reach back into `otel/<component>/`.
+
+```bash
+make k8s-up                    # cluster + build + load + apply + wait + status
+make k8s-status                # pods/services/jobs across all 4 namespaces
+make k8s-down                  # tear down the kustomization (cluster stays)
+```
+
+In-cluster DNS ports:
+
+| URL | Use |
+|---|---|
+| `otel-collector.observability.svc.cluster.local:4317` | OTLP gRPC ingest (services dial here) |
+| `prometheus.observability.svc.cluster.local:9090` | Prometheus UI / API |
+| `grafana.observability.svc.cluster.local:3000` | Grafana UI (port-forward to view: `kubectl -n observability port-forward svc/grafana 3001:3000`) |
+| `tempo.observability.svc.cluster.local:3200` | Tempo HTTP API |
+| `loki.observability.svc.cluster.local:3100` | Loki HTTP API |
+
+**Storage.** All five backends use `emptyDir` for dev (data lost on pod restart). For staging / prod, layer in a `PersistentVolumeClaim` per backend in `otel/k8s/overlays/<env>/`.
+
+**Service-side OTEL_* env.** `modules/<svc>/deploy/k8s/base/configmap.yaml` ships with `OTEL_EXPORTER_OTLP_ENDPOINT` set to the in-cluster Collector. With `make k8s-up`, the obs stack and the services come up together so the dial succeeds. To disable telemetry from a specific service (e.g. for an env without the obs stack), remove that ConfigMap key — `utilotel.Init` falls back to noop providers when the endpoint is empty.
+
+**ConfigMap edits.** Because `disableNameSuffixHash: true` keeps ConfigMap names deterministic, editing `otel/<component>/*` and re-running `make k8s-apply` updates the ConfigMaps but does **not** auto-restart pods. Roll explicitly: `kubectl -n observability rollout restart deploy/<component>`.
 
 ```bash
 # Phase 1 / 2 service rebuild — unchanged

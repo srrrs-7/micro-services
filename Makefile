@@ -204,7 +204,7 @@ K8S_IMAGES     := audit-api:.images/audit/api.Dockerfile \
                   auth-api:.images/auth/api.Dockerfile \
                   queue-api:.images/queue/Dockerfile \
                   migrator:.images/migrator/Dockerfile
-K8S_NAMESPACES := audit auth queue
+K8S_NAMESPACES := audit auth queue observability
 
 .PHONY: k8s-cluster k8s-kubeconfig k8s-build k8s-load k8s-apply k8s-up k8s-status k8s-down k8s-cluster-delete
 
@@ -239,7 +239,12 @@ k8s-load: k8s-cluster ## Load :dev images into the kind cluster
 	done
 
 k8s-apply: k8s-cluster ## Apply the dev kustomization (assumes images already built+loaded)
-	kubectl apply -k deploy/k8s/dev
+	# --load-restrictor=LoadRestrictionsNone allows otel/k8s/base/ to
+	# reference files outside its directory (../../collector/config.yaml
+	# etc.). The configMapGenerator pulls otel/<component>/* into k8s
+	# ConfigMaps so the source-of-truth lives in one place rather than
+	# being duplicated under deploy/k8s/.
+	kubectl kustomize --load-restrictor=LoadRestrictionsNone deploy/k8s/dev | kubectl apply -f -
 
 k8s-up: k8s-cluster k8s-build k8s-load k8s-apply ## Cluster + build + load + apply + wait + status
 	@echo "==> Waiting for stateful dependencies..."

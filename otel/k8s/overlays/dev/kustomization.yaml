@@ -1,0 +1,11 @@
+# Dev overlay for the observability stack. Currently a passthrough — the
+# upstream Collector / Prometheus / Tempo / Loki / Grafana images are
+# pinned in the base manifests (no `:dev` tag overrides), and storage is
+# emptyDir, so there is nothing dev-specific to layer on yet. The file
+# exists to keep the `base/ + overlays/<env>/` shape consistent with the
+# service modules so adding staging / prod overlays later is mechanical.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base

@@ -3,6 +3,7 @@ kind: Kustomization
 namespace: queue
 resources:
   - namespace.yaml
+  - configmap.yaml
   - deployment.yaml
   - service.yaml
   - api-pdb.yaml

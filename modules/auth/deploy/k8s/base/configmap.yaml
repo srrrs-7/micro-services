@@ -5,3 +5,13 @@ metadata:
 data:
   CACHE_ADDR: auth-cache.auth.svc.cluster.local:6379
   CACHE_PREFIX: "auth:"
+  # OpenTelemetry — endpoint points at the in-cluster Collector.
+  # `make k8s-up` brings up the obs stack alongside, so the dial
+  # succeeds. Drop the OTEL_EXPORTER_OTLP_ENDPOINT line locally if
+  # operating without the obs stack in this environment to silence
+  # periodic export errors (utilotel will then fall back to noop).
+  OTEL_SERVICE_NAME: auth-api
+  OTEL_RESOURCE_ATTRIBUTES: service.namespace=auth,deployment.environment=k8s-dev
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
+  OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+  OTEL_TRACES_SAMPLER: always_on

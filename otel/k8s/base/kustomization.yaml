@@ -1,0 +1,56 @@
+# Observability stack base — Collector + Prometheus + Tempo + Loki + Grafana
+# in a dedicated `observability` namespace.
+#
+# Lives under otel/k8s/ rather than the per-service modules/<svc>/deploy/k8s/
+# pattern because (a) observability is not a service module and (b) the
+# kustomize ConfigMapGenerator below references the existing otel/<component>/
+# config files, and kustomize's load-restriction sandbox forbids reaching
+# above the base directory. Co-locating manifests + configs keeps every
+# referenced file within otel/. Editing the source YAML / JSON updates
+# both `make obs-up` (Compose) and `make k8s-up` (kind).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: observability
+
+resources:
+  - namespace.yaml
+  - collector.yaml
+  - prometheus.yaml
+  - tempo.yaml
+  - loki.yaml
+  - grafana.yaml
+
+configMapGenerator:
+  - name: otel-collector-config
+    files:
+      - config.yaml=../../collector/config.yaml
+  - name: prometheus-config
+    files:
+      - prometheus.yml=../../prometheus/prometheus.yml
+  - name: prometheus-rules
+    files:
+      - recording.yml=../../prometheus/rules/recording.yml
+      - alerts.yml=../../prometheus/rules/alerts.yml
+  - name: tempo-config
+    files:
+      - tempo.yaml=../../tempo/tempo.yaml
+  - name: loki-config
+    files:
+      - loki.yaml=../../loki/loki.yaml
+  - name: grafana-datasources
+    files:
+      - default.yaml=../../grafana/provisioning/datasources/default.yaml
+  - name: grafana-dashboard-providers
+    files:
+      - default.yaml=../../grafana/provisioning/dashboards/default.yaml
+  - name: grafana-dashboards
+    files:
+      - go-runtime.json=../../grafana/dashboards/go-runtime.json
+      - http-red.json=../../grafana/dashboards/http-red.json
+      - grpc-red.json=../../grafana/dashboards/grpc-red.json
+
+# Deterministic ConfigMap names so Deployment volumes don't have to chase
+# rotated suffixes. Trade-off: editing a ConfigMap won't auto-trigger a
+# pod restart — `kubectl rollout restart deploy/<svc>` after edits.
+generatorOptions:
+  disableNameSuffixHash: true

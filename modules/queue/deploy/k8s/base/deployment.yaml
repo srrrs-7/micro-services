@@ -42,6 +42,9 @@ spec:
           ports:
             - containerPort: 8080
               name: grpc
+          envFrom:
+            - configMapRef:
+                name: queue-api-config
           # Native gRPC probe (k8s 1.24+ GA). queue/route/server.go registers
           # grpc.health.v1 with the empty service in SERVING, so an unset
           # `service:` field is sufficient. `port:` MUST be numeric here —

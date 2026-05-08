@@ -4,6 +4,16 @@ metadata:
   name: audit-api-config
 data:
   QUEUE_ADDR: queue-api.queue.svc.cluster.local:8080
+  # OpenTelemetry — endpoint points at the in-cluster Collector.
+  # `make k8s-up` brings up the obs stack alongside, so the dial
+  # succeeds. Drop the OTEL_EXPORTER_OTLP_ENDPOINT line locally if
+  # operating without the obs stack in this environment to silence
+  # periodic export errors (utilotel will then fall back to noop).
+  OTEL_SERVICE_NAME: audit-api
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
+  OTEL_RESOURCE_ATTRIBUTES: service.namespace=audit,deployment.environment=k8s-dev
+  OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+  OTEL_TRACES_SAMPLER: always_on
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -11,3 +21,8 @@ metadata:
   name: audit-worker-config
 data:
   QUEUE_ADDR: queue-api.queue.svc.cluster.local:8080
+  OTEL_SERVICE_NAME: audit-worker
+  OTEL_RESOURCE_ATTRIBUTES: service.namespace=audit,deployment.environment=k8s-dev
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
+  OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+  OTEL_TRACES_SAMPLER: always_on
