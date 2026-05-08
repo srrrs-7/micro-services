@@ -124,18 +124,19 @@ hooks: hooks-install ## Alias for hooks-install
 
 ##@ Observability (OTel Collector + Prometheus + Grafana + Tempo + Loki)
 
-# The obs stack lives in otel/compose.yml; load it via -f alongside the
-# root compose.yml. To send telemetry from your service stack, re-run the
-# per-service stack with OTEL_EXPORTER_OTLP_ENDPOINT exported — obs-up
-# prints the exact command after starting.
+# Every Compose call (service stack + obs stack) loads BOTH compose.yml and
+# otel/compose.yml so containers from either side belong to the same Compose
+# project — this is what suppresses the "Found orphan containers" warning
+# when `make audit` runs while obs is up. Service-stack targets still pass
+# explicit service names, so obs services don't get auto-started.
 OBS_OTLP_ENDPOINT := http://otel-collector:4317
 OBS_SERVICES      := otel-collector prometheus grafana tempo loki
-OBS_COMPOSE_FILES := -f compose.yml -f otel/compose.yml
+COMPOSE_FILES     := -f compose.yml -f otel/compose.yml
 
 .PHONY: obs-up obs-down obs-logs obs-status
 
 obs-up: ## Bring up the observability stack (does NOT touch service stacks)
-	docker-compose $(OBS_COMPOSE_FILES) up -d $(OBS_SERVICES)
+	docker-compose $(COMPOSE_FILES) up -d $(OBS_SERVICES)
 	@echo ""
 	@echo "==> Obs stack is up."
 	@echo "    Grafana    http://localhost:3001  (anonymous Admin)"
@@ -150,14 +151,14 @@ obs-up: ## Bring up the observability stack (does NOT touch service stacks)
 	@echo ""
 
 obs-down: ## Stop & remove the obs stack containers (data volumes preserved)
-	docker-compose $(OBS_COMPOSE_FILES) stop  $(OBS_SERVICES)
-	docker-compose $(OBS_COMPOSE_FILES) rm -f $(OBS_SERVICES)
+	docker-compose $(COMPOSE_FILES) stop  $(OBS_SERVICES)
+	docker-compose $(COMPOSE_FILES) rm -f $(OBS_SERVICES)
 
 obs-logs: ## Tail otel-collector logs
-	docker-compose $(OBS_COMPOSE_FILES) logs -f otel-collector
+	docker-compose $(COMPOSE_FILES) logs -f otel-collector
 
 obs-status: ## Show obs container status
-	@docker-compose $(OBS_COMPOSE_FILES) ps $(OBS_SERVICES)
+	@docker-compose $(COMPOSE_FILES) ps $(OBS_SERVICES)
 
 ##@ Docker hygiene
 
@@ -266,20 +267,20 @@ service_targets := $(SERVICES) \
 $(SERVICES): %: %-build %-up %-migrate
 
 $(SERVICES:%=%-up): %-up:
-	docker-compose up -d $($*_compose_up)
+	docker-compose $(COMPOSE_FILES) up -d $($*_compose_up)
 
 $(SERVICES:%=%-build): %-build:
-	docker-compose build $($*_compose_up)
+	docker-compose $(COMPOSE_FILES) build $($*_compose_up)
 
 $(SERVICES:%=%-down): %-down:
-	docker-compose down $($*_compose_down)
+	docker-compose $(COMPOSE_FILES) down $($*_compose_down)
 
 $(SERVICES:%=%-new-migrate): %-new-migrate:
-	docker-compose run --rm migrator migrate new --dir $(migrate_dir)
+	docker-compose $(COMPOSE_FILES) run --rm migrator migrate new --dir $(migrate_dir)
 
 $(SERVICES:%=%-migrate): %-migrate:
-	docker-compose run --rm migrator migrate hash --dir $(migrate_dir)
-	docker-compose run --rm migrator migrate apply --url $(migrate_url) --dir $(migrate_dir)
+	docker-compose $(COMPOSE_FILES) run --rm migrator migrate hash --dir $(migrate_dir)
+	docker-compose $(COMPOSE_FILES) run --rm migrator migrate apply --url $(migrate_url) --dir $(migrate_dir)
 
 $(SERVICES:%=%-sqlc-gen): %-sqlc-gen:
 	cd modules/$*/src/infra/database && sqlc generate

@@ -34,7 +34,10 @@ services:
     image: postgres:latest
     container_name: audit-db
     ports:
-      - 5432:5432
+      # Host 5432 is the default Postgres port and tends to collide with
+      # other dev projects' postgres containers. Container internal port
+      # stays 5432 (audit-api dials by container DNS, not host).
+      - 5434:5432
     environment:
       POSTGRES_DB: audit
       POSTGRES_USER: audit

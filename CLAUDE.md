@@ -44,7 +44,7 @@ cd modules/<service>/src && go test -run TestName ./path/to/pkg
 ### Per-service stack (Docker Compose)
 - `make audit` ≡ `audit-build` + `audit-up` + `audit-migrate`. Brings up `audit-api`, `audit-worker`, `audit-db`, `queue-api`, `migrator`. `make audit-down` stops them.
 - `make auth` ≡ `auth-build` + `auth-up` + `auth-migrate`. Brings up `auth-api`, `auth-db`, `migrator` (note: the auth API depends on the `auth_cache` Redis service in `compose.yml`, but `auth-up` does not start it — start it explicitly with `docker compose up -d auth_cache` if running auth-api locally).
-- Postgres ports: audit `5432`, auth `5433`. Redis: `6379`. API containers expose `8080` internally.
+- Postgres host ports: audit `5434` (avoids the very common host-:5432 collision), auth `5433`. Container internal port stays 5432 so service-to-service DNS is unaffected. Redis: `6379`. API containers expose `8080` internally.
 
 ### gRPC code generation
 - `make queue-proto-gen` / `make audit-proto-gen` regenerate one service's `*.pb.go` + `*_grpc.pb.go` from the `.proto` next to them.
