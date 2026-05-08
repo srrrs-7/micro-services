@@ -30,7 +30,7 @@ The following tools are required and are pre-installed in the devcontainer (`.de
 All commands run from the repo root unless noted. The `MODS` variable in the `Makefile` is `auth audit queue shared` — module-wide targets iterate that list.
 
 ### Workspace-wide
-- `make test` — runs `go test -v -coverprofile=coverage.txt ./...` per module and prints the `total:` coverage line; HTML report written to `coverage.html`
+- `make test` — runs `go test -v -coverprofile=...` per module and prints the `total:` coverage line; profiles + HTML reports land under `.coverage/<mod>-coverage.{txt,html}` at the repo root (single hidden directory, gitignored). `make clean-coverage` removes them.
 - `make fmt` / `make vet` / `make lint` — per-module `go fmt`, `go vet`, `golangci-lint run`
 - `make tidy` / `make update` — `go mod tidy` (and `go get -u ./...` for `update`) per module
 - `make hooks` — installs git hooks at `.githooks/` (pre-commit: `fmt + vet + lint`; pre-push: `test`) and points `core.hooksPath` at it. Run after first checkout. `make hooks-uninstall` removes them.

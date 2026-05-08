@@ -161,17 +161,19 @@ A future `make <service>-test-integration` target would be a reasonable place to
 ## 6. What `make test` does today
 
 ```
+mkdir -p .coverage
+out=$(pwd)/.coverage
 for mod in auth audit queue shared; do
-  cd modules/$mod/src && go test -v -coverprofile=coverage.out ./...
-  go tool cover -func=coverage.txt | grep total
-  go tool cover -html=coverage.txt -o coverage.html
+  ( cd modules/$mod/src && go test -v -coverprofile=$out/$mod-coverage.txt ./... )
+  go tool cover -func=$out/$mod-coverage.txt | grep total
+  go tool cover -html=$out/$mod-coverage.txt -o $out/$mod-coverage.html
 done
 ```
 
 Implications:
 - Tests run **per module** in the module's own `go test` invocation. Cross-module test imports are impossible (each module is a separate Go module). If you need a fixture in two modules, put it in `shared`.
 - `-v` is on, so all test output is shown — keep `t.Log` output meaningful.
-- Coverage HTML is written to `modules/<m>/src/coverage.html` and is gitignored.
+- Coverage profiles + HTML for every module land under `.coverage/<mod>-coverage.{txt,html}` at the repo root and are gitignored. `make clean-coverage` removes them (along with any stale `modules/<m>/src/coverage.{txt,html}` left over from before the aggregation moved).
 - The pre-push hook runs `make test` — broken tests block `git push` (per `.githooks/pre-push`).
 
 ## 7. Running a single test

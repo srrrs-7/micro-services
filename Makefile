@@ -56,14 +56,30 @@ help: ## Show this help
 
 ##@ Workspace (Go modules)
 
-.PHONY: test fmt tidy vet lint env update
-test: ## go test + per-module coverage across every module
-	@for mod in $(MODS); do \
+# Aggregated coverage output. Hidden dir at the repo root keeps `ls` clean
+# and matches the dotfile habit used elsewhere (.devcontainer/, .claude/).
+# Files land as `<mod>-coverage.{txt,html}` so a single glob covers
+# everything (e.g. CI artifact upload, codecov uploaders).
+COVER_DIR := .coverage
+
+.PHONY: test fmt tidy vet lint env update clean-coverage
+test: ## go test + per-module coverage (output → ./.coverage/<mod>-coverage.{txt,html})
+	@mkdir -p $(COVER_DIR)
+	@out=$(CURDIR)/$(COVER_DIR); \
+	for mod in $(MODS); do \
 		echo "--- Running tests for module: $$mod ---"; \
 		( cd modules/$$mod/src && \
-		  go test -v -coverprofile=coverage.txt ./... && \
-		  go tool cover -func=coverage.txt | grep total && \
-		  go tool cover -html=coverage.txt -o coverage.html ) || exit $$?; \
+		  go test -v -coverprofile=$$out/$$mod-coverage.txt ./... && \
+		  go tool cover -func=$$out/$$mod-coverage.txt | grep total && \
+		  go tool cover -html=$$out/$$mod-coverage.txt \
+		    -o $$out/$$mod-coverage.html \
+		) || exit $$?; \
+	done
+
+clean-coverage: ## Remove .coverage/ and any stale per-module coverage artifacts
+	@rm -rf $(COVER_DIR)
+	@for mod in $(MODS); do \
+		rm -f modules/$$mod/src/coverage.txt modules/$$mod/src/coverage.html; \
 	done
 
 fmt: ## go fmt across every module
