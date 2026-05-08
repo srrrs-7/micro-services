@@ -13,6 +13,7 @@ import (
 
 	"queue/route"
 	"shared/utillog"
+	"shared/utilotel"
 )
 
 func init() {
@@ -27,6 +28,11 @@ func main() {
 }
 
 func run() error {
+	otelShutdown, err := utilotel.Init(context.Background(), "queue-api")
+	if err != nil {
+		return err
+	}
+
 	// ===== DI =====
 	h := route.NewHandler()
 	srv := route.NewServer(&h)
@@ -52,12 +58,12 @@ func run() error {
 	<-ctx.Done()
 	slog.Info("shutdown signal received")
 
-	shutdown(srv)
+	shutdown(srv, otelShutdown)
 
 	return nil
 }
 
-func shutdown(srv *grpc.Server) {
+func shutdown(srv *grpc.Server, otelShutdown func(context.Context) error) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -73,5 +79,9 @@ func shutdown(srv *grpc.Server) {
 	case <-shutdownCtx.Done():
 		slog.Warn("graceful shutdown timed out, forcing stop")
 		srv.Stop()
+	}
+
+	if err := otelShutdown(shutdownCtx); err != nil {
+		slog.Error("failed to shutdown otel", "error", err)
 	}
 }

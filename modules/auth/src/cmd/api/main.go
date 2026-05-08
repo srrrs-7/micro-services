@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"shared/utilcache"
 	"shared/utillog"
+	"shared/utilotel"
 	"syscall"
 	"time"
 
@@ -70,6 +71,11 @@ func run() error {
 		return err
 	}
 
+	otelShutdown, err := utilotel.Init(context.Background(), "auth-api")
+	if err != nil {
+		return err
+	}
+
 	rds, err := utilcache.NewClient(e.cacheAddr, e.cachePrefix)
 	if err != nil {
 		return err
@@ -103,12 +109,12 @@ func run() error {
 	<-ctx.Done()
 	slog.Info("shutdown signal received")
 
-	shutdown(srv, connDB, rds)
+	shutdown(srv, connDB, rds, otelShutdown)
 
 	return nil
 }
 
-func shutdown(srv *http.Server, connDB *sql.DB, rds *redis.Client) {
+func shutdown(srv *http.Server, connDB *sql.DB, rds *redis.Client, otelShutdown func(context.Context) error) {
 	slog.Info("shutdown signal received")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -117,6 +123,12 @@ func shutdown(srv *http.Server, connDB *sql.DB, rds *redis.Client) {
 	// server停止
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("server shutdown failed", "error", err)
+	}
+
+	// OTel SDK は traffic 経路の外なのでここで先に flush。残った in-flight
+	// span / metric を Collector に投げてから DB / cache を閉じる。
+	if err := otelShutdown(shutdownCtx); err != nil {
+		slog.Error("failed to shutdown otel", "error", err)
 	}
 
 	// リソース解放（順序重要）

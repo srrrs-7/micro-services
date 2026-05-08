@@ -8,6 +8,7 @@ import (
 
 	auditgrpc "audit/route/grpc"
 	"audit/route/interceptor"
+	"shared/utilotel"
 )
 
 // NewServer constructs the gRPC server with the project's interceptor chain
@@ -17,6 +18,7 @@ import (
 // in docs/system-design.md §14.
 func NewServer(h auditgrpc.AuditServer) *grpc.Server {
 	s := grpc.NewServer(
+		utilotel.GRPCServerOption(),
 		grpc.ChainUnaryInterceptor(
 			interceptor.Logging(),
 			interceptor.Recovery(),

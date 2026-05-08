@@ -13,6 +13,7 @@ import (
 
 	queuegrpc "queue/route/grpc"
 	"shared/utilgrpc"
+	"shared/utilotel"
 )
 
 // Option re-exports utilgrpc.Option so consumers configure Client without
@@ -43,8 +44,12 @@ type Client struct {
 }
 
 // New dials addr via shared/utilgrpc (plaintext default; switch via
-// utilgrpc.WithTLS) and returns a ready-to-use Client.
+// utilgrpc.WithTLS) and returns a ready-to-use Client. The OTel client
+// stats handler is prepended so trace context (W3C TraceContext) and
+// rpc.client.* metrics propagate audit→queue automatically; callers may
+// still pass additional options after.
 func New(addr string, opts ...Option) (*Client, error) {
+	opts = append([]Option{utilotel.GRPCClientOption()}, opts...)
 	conn, err := utilgrpc.Dial(addr, opts...)
 	if err != nil {
 		return nil, err

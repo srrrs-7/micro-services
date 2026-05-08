@@ -4,6 +4,9 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi"
+
+	"auth/route/middleware"
+	"shared/utilotel"
 )
 
 type handler struct {
@@ -18,6 +21,8 @@ func (h *handler) Router() *chi.Mux {
 	r := chi.NewMux()
 
 	r.Use(r.Middlewares()...)
+	r.Use(utilotel.HTTPMiddleware("auth-api"))
+	r.Use(middleware.RouteTag())
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {})
 

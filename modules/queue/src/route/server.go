@@ -8,6 +8,7 @@ import (
 
 	queuegrpc "queue/route/grpc"
 	"queue/route/interceptor"
+	"shared/utilotel"
 )
 
 // NewServer constructs the gRPC server with the project's interceptor chain
@@ -17,6 +18,7 @@ import (
 // in docs/system-design.md §13 Phase 1.5.
 func NewServer(h queuegrpc.QueueServer) *grpc.Server {
 	s := grpc.NewServer(
+		utilotel.GRPCServerOption(),
 		grpc.ChainUnaryInterceptor(
 			interceptor.Logging(),
 			interceptor.Recovery(),
