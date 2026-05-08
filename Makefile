@@ -138,7 +138,7 @@ obs-up: ## Bring up the observability stack (does NOT touch service stacks)
 	docker-compose $(OBS_COMPOSE_FILES) up -d $(OBS_SERVICES)
 	@echo ""
 	@echo "==> Obs stack is up."
-	@echo "    Grafana    http://localhost:3000  (anonymous Admin)"
+	@echo "    Grafana    http://localhost:3001  (anonymous Admin)"
 	@echo "    Prometheus http://localhost:9090"
 	@echo "    Tempo      http://localhost:3200"
 	@echo "    Loki       http://localhost:3100"

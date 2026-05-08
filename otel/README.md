@@ -10,7 +10,7 @@ For the **why** behind these choices (push-via-Collector, `shared/utilotel` plac
 make obs-up                                                      # collector + prometheus + grafana + tempo + loki
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317 make audit  # recreate audit stack with OTel enabled
 # generate some traffic (gRPC client / curl / etc.)
-open http://localhost:3000                                       # Grafana, anonymous Admin
+open http://localhost:3001                                       # Grafana, anonymous Admin (3001 to dodge dev-server :3000 collisions)
 make obs-down                                                    # stop the obs stack (volumes preserved)
 ```
 
@@ -51,7 +51,7 @@ make obs-down                                                    # stop the obs 
                              │
                        ┌──────────────┐
                        │   grafana    │
-                       │  :3000       │
+                       │ host :3001   │
                        └──────────────┘
 ```
 
@@ -67,7 +67,7 @@ Cross-signal correlation is provisioned in Grafana: **Tempo→Loki** (find logs 
 
 | Port | Service | Purpose |
 |---|---|---|
-| `3000` | grafana | UI |
+| `3001` | grafana | UI (host 3001 → container 3000; remap to dodge :3000 dev-server collisions) |
 | `3100` | loki | HTTP API |
 | `3200` | tempo | HTTP query API |
 | `4317` | otel-collector | OTLP gRPC (services push here) |
