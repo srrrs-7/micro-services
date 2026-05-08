@@ -1,0 +1,96 @@
+# Observability stack — included by the root compose.yml. All services run
+# under `profiles: [obs]`, so they only start when the user explicitly opts
+# in via `make obs-up` (i.e. they do not affect `make audit` / `make auth`).
+#
+# Networks: every service joins the `internal` bridge defined in the root
+# compose.yml so service-to-service DNS (otel-collector, prometheus, tempo,
+# loki, grafana) resolves.
+services:
+  otel-collector:
+    profiles: [obs]
+    image: otel/opentelemetry-collector-contrib:0.117.0
+    container_name: otel-collector
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./otel/collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC (services push here)
+      - "4318:4318" # OTLP HTTP
+      - "8889:8889" # Prometheus exporter (scraped by Prometheus)
+    networks: [internal]
+    depends_on:
+      - tempo
+      - loki
+
+  prometheus:
+    profiles: [obs]
+    image: prom/prometheus:v3.0.1
+    container_name: prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=24h
+      - --enable-feature=otlp-write-receiver
+    volumes:
+      - ./otel/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks: [internal]
+
+  tempo:
+    profiles: [obs]
+    image: grafana/tempo:2.6.1
+    container_name: tempo
+    command: ["-config.file=/etc/tempo.yaml"]
+    user: "0"
+    volumes:
+      - ./otel/tempo/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "3200:3200" # Tempo HTTP query API (Grafana datasource)
+    networks: [internal]
+
+  loki:
+    profiles: [obs]
+    image: grafana/loki:3.3.2
+    container_name: loki
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    user: "0"
+    volumes:
+      - ./otel/loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/var/loki
+    ports:
+      - "3100:3100"
+    networks: [internal]
+
+  grafana:
+    profiles: [obs]
+    image: grafana/grafana:11.4.0
+    container_name: grafana
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./otel/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./otel/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks: [internal]
+    depends_on:
+      - prometheus
+      - tempo
+      - loki
+
+volumes:
+  prometheus-data:
+    driver: local
+  tempo-data:
+    driver: local
+  loki-data:
+    driver: local
+  grafana-data:
+    driver: local

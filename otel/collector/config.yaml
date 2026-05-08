@@ -1,0 +1,85 @@
+# OpenTelemetry Collector configuration for the local dev stack.
+#
+# Ingest path: services push OTLP/gRPC on :4317 → memory_limiter →
+# filter (drop probe noise) → resource enrichment → batch → backend.
+# Backends: Prometheus exporter (:8889) for metrics, Tempo for traces,
+# Loki for logs. The logs pipeline is wired today but has no input until
+# Phase 3 chooses between filelog (host-side) and otelslog (in-process).
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Bound the in-memory queue so a slow backend cannot OOM the collector.
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Drop probe spans so they don't pollute Tempo. Health checks run every
+  # few seconds and otherwise dominate by volume.
+  filter/healthcheck:
+    error_mode: ignore
+    traces:
+      span:
+        - 'attributes["http.route"] == "/health"'
+        - 'name == "grpc.health.v1.Health/Check"'
+        - 'name == "grpc.health.v1.Health/Watch"'
+
+  # Tag every record with the local environment so future overlays
+  # (staging / prod collectors) can be distinguished without touching
+  # service config.
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: local
+        action: upsert
+
+  batch:
+    send_batch_size: 1024
+    timeout: 5s
+
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+    tls:
+      insecure: true
+
+  debug:
+    verbosity: basic
+
+service:
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, filter/healthcheck, resource, batch]
+      exporters: [otlp/tempo]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheus]
+    # Logs pipeline is reachable but has no producer in Phase 1. When
+    # Phase 3 wires logs (filelog receiver or in-process otelslog), the
+    # exporter side is already in place.
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/loki]

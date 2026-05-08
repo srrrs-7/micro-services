@@ -122,6 +122,41 @@ hooks-uninstall: ## Remove the hooks installed by hooks-install
 
 hooks: hooks-install ## Alias for hooks-install
 
+##@ Observability (OTel Collector + Prometheus + Grafana + Tempo + Loki)
+
+# Run only the obs services. To send telemetry from your service stack,
+# re-run the per-service stack with OTEL_EXPORTER_OTLP_ENDPOINT exported —
+# obs-up prints the exact command after starting.
+OBS_OTLP_ENDPOINT := http://otel-collector:4317
+OBS_SERVICES      := otel-collector prometheus grafana tempo loki
+
+.PHONY: obs-up obs-down obs-logs obs-status
+
+obs-up: ## Bring up the observability stack (does NOT touch service stacks)
+	docker compose --profile obs up -d $(OBS_SERVICES)
+	@echo ""
+	@echo "==> Obs stack is up."
+	@echo "    Grafana   http://localhost:3000  (anonymous Admin)"
+	@echo "    Prometheus http://localhost:9090"
+	@echo "    Tempo     http://localhost:3200"
+	@echo "    Loki      http://localhost:3100"
+	@echo ""
+	@echo "==> To send telemetry, recreate your service stack with the"
+	@echo "    OTLP endpoint exported, e.g.:"
+	@echo "      OTEL_EXPORTER_OTLP_ENDPOINT=$(OBS_OTLP_ENDPOINT) make audit"
+	@echo "      OTEL_EXPORTER_OTLP_ENDPOINT=$(OBS_OTLP_ENDPOINT) make auth"
+	@echo ""
+
+obs-down: ## Stop & remove the obs stack containers (data volumes preserved)
+	docker compose stop  $(OBS_SERVICES)
+	docker compose rm -f $(OBS_SERVICES)
+
+obs-logs: ## Tail otel-collector logs
+	docker compose logs -f otel-collector
+
+obs-status: ## Show obs container status
+	@docker compose --profile obs ps $(OBS_SERVICES)
+
 ##@ Docker hygiene
 
 .PHONY: rmi rmv

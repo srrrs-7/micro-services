@@ -1,3 +1,10 @@
+include:
+  - otel/compose.yml
+
+# OTEL_EXPORTER_OTLP_ENDPOINT is interpolated from the host shell so the
+# default (unset → empty) keeps utilotel.Init in noop mode. `make obs-up`
+# prints the command to re-run service stacks with this set.
+
 services:
   migrator:
     build:
@@ -15,8 +22,14 @@ services:
       dockerfile: ./.images/audit/api.Dockerfile
     container_name: audit-api
     depends_on:
-      audit-db: 
+      audit-db:
         condition: service_healthy
+    environment:
+      OTEL_SERVICE_NAME: audit-api
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=audit,deployment.environment=local
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_TRACES_SAMPLER: always_on
     networks:
       - internal
   audit-db:
@@ -41,6 +54,12 @@ services:
     build:
       dockerfile: ./.images/audit/worker.Dockerfile
     container_name: audit-worker
+    environment:
+      OTEL_SERVICE_NAME: audit-worker
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=audit,deployment.environment=local
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_TRACES_SAMPLER: always_on
     networks:
       - internal
 
@@ -51,10 +70,16 @@ services:
       dockerfile: ./.images/auth/api.Dockerfile
     container_name: auth-api
     depends_on:
-      auth-db: 
+      auth-db:
         condition: service_healthy
       auth_cache:
         condition: service_healthy
+    environment:
+      OTEL_SERVICE_NAME: auth-api
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=auth,deployment.environment=local
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_TRACES_SAMPLER: always_on
     networks:
       - internal
   auth-db:
@@ -94,6 +119,12 @@ services:
       context: .
       dockerfile: ./.images/queue/Dockerfile
     container_name: queue-api
+    environment:
+      OTEL_SERVICE_NAME: queue-api
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=queue,deployment.environment=local
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_TRACES_SAMPLER: always_on
     networks:
       - internal
 

@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Services push metrics via OTLP to the Collector; Prometheus scrapes the
+  # Collector's prometheus exporter. There are no per-service /metrics
+  # endpoints — see otel/README.md for the reasoning.
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8889"]
+
+  # Self-monitor.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
