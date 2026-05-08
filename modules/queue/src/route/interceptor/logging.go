@@ -18,7 +18,9 @@ func Logging() grpc.UnaryServerInterceptor {
 		start := time.Now()
 		resp, err := handler(ctx, req)
 		st, _ := status.FromError(err)
-		slog.Info("grpc call",
+		// slog.InfoContext so the otelslog bridge can attach trace_id /
+		// span_id from the active span on ctx (Phase 3 trace↔log correlation).
+		slog.InfoContext(ctx, "grpc call",
 			"method", info.FullMethod,
 			"code", st.Code().String(),
 			"duration_ms", time.Since(start).Milliseconds(),
