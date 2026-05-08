@@ -28,7 +28,7 @@ func GRPCServerOption() grpc.ServerOption {
 
 // GRPCClientOption returns a utilgrpc.Option that registers the OTel stats
 // handler on a client connection. It composes naturally with the existing
-// utilgrpc.WithUnaryInterceptors / WithTLS option set:
+// utilgrpc.WithUnaryInterceptors option set:
 //
 //	conn, err := utilgrpc.Dial(addr,
 //	    utilotel.GRPCClientOption(),

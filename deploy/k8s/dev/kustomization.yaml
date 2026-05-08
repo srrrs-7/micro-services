@@ -5,3 +5,4 @@ resources:
   - ../../../modules/auth/deploy/k8s/overlays/dev
   - ../../../modules/queue/deploy/k8s/overlays/dev
   - ../../../otel/k8s/overlays/dev
+  - peerauthentication.yaml

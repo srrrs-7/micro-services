@@ -2,3 +2,7 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: audit
+  labels:
+    # Ambient enrollment: ztunnel intercepts traffic for pods in this ns and
+    # encrypts inter-pod traffic via HBONE. Pods need no sidecar.
+    istio.io/dataplane-mode: ambient

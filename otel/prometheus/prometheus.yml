@@ -17,3 +17,12 @@ scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ["localhost:9090"]
+
+  # Istio control plane (k8s-only — `make obs-up` Compose path will show
+  # this as a down target because there is no istiod outside k8s; ignore).
+  # Cross-ns DNS works because Prometheus runs in the observability ns and
+  # the istio-system Service is cluster-DNS reachable.
+  - job_name: istiod
+    static_configs:
+      - targets: ["istiod.istio-system.svc.cluster.local:15014"]
+    metrics_path: /metrics

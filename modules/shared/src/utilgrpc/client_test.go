@@ -5,33 +5,7 @@ import (
 	"testing"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 )
-
-// fakeCreds is an interface-satisfying TransportCredentials whose only
-// purpose is to act as a sentinel value for option-application tests. The
-// embedded interface fills out the method set with nils we never call —
-// these tests never trigger a real handshake.
-type fakeCreds struct {
-	credentials.TransportCredentials
-	id string
-}
-
-func TestWithTLS_replacesDefaultTransportCreds(t *testing.T) {
-	want := &fakeCreds{id: "tls-1"}
-	cfg := config{transportCreds: insecure.NewCredentials()}
-
-	WithTLS(want)(&cfg)
-
-	got, ok := cfg.transportCreds.(*fakeCreds)
-	if !ok {
-		t.Fatalf("transportCreds = %T, want *fakeCreds", cfg.transportCreds)
-	}
-	if got != want {
-		t.Errorf("transportCreds identity mismatch: got=%p want=%p", got, want)
-	}
-}
 
 func TestWithUnaryInterceptors_accumulatesAcrossCalls(t *testing.T) {
 	noop := func(_ context.Context, _ string, _, _ any, _ *grpc.ClientConn, _ grpc.UnaryInvoker, _ ...grpc.CallOption) error {
@@ -95,7 +69,6 @@ func TestDial_acceptsAllOptionTypesTogether(t *testing.T) {
 	}
 
 	conn, err := Dial("localhost:0",
-		WithTLS(insecure.NewCredentials()),
 		WithUnaryInterceptors(unary),
 		WithStreamInterceptors(stream),
 		WithDialOption(grpc.WithUserAgent("test")),
@@ -104,22 +77,4 @@ func TestDial_acceptsAllOptionTypesTogether(t *testing.T) {
 		t.Fatalf("Dial: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-}
-
-func TestDial_appliesOptionsLeftToRight(t *testing.T) {
-	first := &fakeCreds{id: "first"}
-	second := &fakeCreds{id: "second"}
-
-	cfg := config{transportCreds: insecure.NewCredentials()}
-	for _, opt := range []Option{WithTLS(first), WithTLS(second)} {
-		opt(&cfg)
-	}
-
-	got, ok := cfg.transportCreds.(*fakeCreds)
-	if !ok {
-		t.Fatalf("transportCreds = %T, want *fakeCreds", cfg.transportCreds)
-	}
-	if got.id != "second" {
-		t.Errorf("last WithTLS did not win: got id=%q", got.id)
-	}
 }

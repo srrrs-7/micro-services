@@ -15,8 +15,12 @@
 
 ```
 deploy/k8s/
+├── istio.md                        # env-agnostic な Istio Ambient 解説
 └── dev/                            # `kubectl apply -k deploy/k8s/dev` のエントリポイント
-    └── kustomization.yaml          # modules/<svc>/deploy/k8s/overlays/dev を resources に列挙
+    ├── kustomization.yaml          # modules/<svc>/overlays/dev + otel/k8s/overlays/dev + peerauthentication.yaml
+    └── peerauthentication.yaml     # Istio 自前 CR (env 固有 — dev は PERMISSIVE)
+
+# 将来 stg/, prd/ も同じ shape (kustomization.yaml + 自前 CR)
 
 modules/<svc>/deploy/k8s/
 ├── base/                           # 環境非依存の形（Deployment, Service, Job, NetworkPolicy, PDB）
@@ -83,7 +87,11 @@ API ワークロード（`*-api`）は **「同一名前空間内で常に複数
 
 ### 5.1 ロードバランシングの仕組み
 
-ClusterIP Service が selector でマッチした Pod に対し、kube-proxy が iptables/IPVS でラウンドロビン分散する。これが本リポジトリの「LB」の正体で、追加コンポーネント（Ingress, Service Mesh）は導入していない。
+ClusterIP Service が selector でマッチした Pod に対し、kube-proxy が iptables/IPVS でラウンドロビン分散する。これが east-west（pod 間）の「LB」の正体。
+
+north-south（外部入口）は **Istio Gateway API** が担当する。`make k8s-up` で Istio Ambient を導入済みで、`auth` namespace の `Gateway` + `HTTPRoute` (`modules/auth/deploy/k8s/base/gateway.yaml`) が auth-api への入口になる。dev でホストから到達するには `make istio-port-forward` (`localhost:8081` → `svc/auth-gateway-istio:80`)。詳細は `deploy/k8s/istio.md`。
+
+east-west の自動 mTLS は Istio Ambient の **ztunnel** が担当（namespace に `istio.io/dataplane-mode: ambient` ラベルが付く Pod 間で透過的に HBONE 暗号化）。
 
 ```
 caller pod
@@ -91,6 +99,7 @@ caller pod
    ▼
 [ClusterIP: auth-api]
    │  kube-proxy が iptables/IPVS で分散
+   │  + ztunnel が HBONE (mTLS) でラップ
    ├──▶ pod auth-api-xxxxx-aaaaa  (replica 1)
    └──▶ pod auth-api-xxxxx-bbbbb  (replica 2)
 ```
@@ -366,11 +375,12 @@ kubectl -n auth rollout restart deployment/auth-api # 該当を再起動
 
 | 状態 | 内容 |
 |---|---|
-| ✅ ある | dev overlay（kind）、base 側の HA 設定（replicas:2, RollingUpdate, Anti-Affinity, PDB, preStop） |
-| ❌ まだない | staging / prod overlay。Ingress（外部公開）、ExternalSecrets、HPA、ServiceMonitor、ClusterIssuer 等の本番配線 |
+| ✅ ある | dev overlay（kind）、base 側の HA 設定（replicas:2, RollingUpdate, Anti-Affinity, PDB, preStop）、Istio Ambient（mTLS + Gateway API 入口） |
+| ❌ まだない | staging / prod overlay。ExternalSecrets、HPA、ServiceMonitor、ClusterIssuer 等の本番配線。audit/queue 用の Gateway（外部公開予定なら追加） |
 | ⚠️ stub | audit-worker のバイナリのみ。Pod は CrashLoopBackOff で正常（`audit-api` / `queue-api` は gRPC サーバとして常駐する） |
 | ⚠️ kindnet 制限 | NetworkPolicy が dev 環境では強制されない。Calico を入れれば強制される |
 | ⚠️ 単一 PV | dev の PVC は kind の local-path-provisioner（ノード固有）。マルチノード kind では Pod が別ノードに schedule された瞬間にデータを失う |
+| ⚠️ mTLS posture | dev は PERMISSIVE。STRICT への切替は `deploy/k8s/istio.md` §4 を参照 |
 
 ## 15. トラブルシューティング
 
@@ -442,8 +452,9 @@ kubectl -n auth describe pod -l app.kubernetes.io/name=auth,app.kubernetes.io/co
 
 ## 16. 関連ドキュメント
 
-- `.claude/rules/kubernetes-conventions.md` — 命名・ラベル・Service 種別・migration ポリシーの拘束ルール
+- `.claude/rules/kubernetes-conventions.md` — 命名・ラベル・Service 種別・migration・Service Mesh ルール（§13）
+- `deploy/k8s/istio.md` — Istio Ambient の構成・ホスト到達・STRICT mTLS 移行手順
 - `modules/auth/docs/system-design.md` — auth サービスの設計（OAuth/OIDC, MVP）
 - `modules/audit/docs/system-design.md` — audit サービスの設計（5W1H 監査基盤）
 - `modules/queue/docs/system-design.md` — queue サービスの設計（priority queue）
-- `Makefile` — `K8S_IMAGES`、`K8S_NAMESPACES`、`k8s-*` ターゲットの実装
+- `Makefile` — `K8S_IMAGES`、`K8S_NAMESPACES`、`k8s-*` / `istio-*` ターゲットの実装

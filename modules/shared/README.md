@@ -11,7 +11,7 @@
 | [`utilhttp`](src/utilhttp/) | HTTP レイヤの共通基盤 | `AppError` + 8 種の `New*Error` factory, `RequestBody[T]` / `RequestUrlParam[T]` (Validator 制約付きジェネリクス), `ResponseOk` / `ResponseError`, `SuccessResponse[T]` / `ErrorResponse`, `Validator` インターフェース |
 | [`utillog`](src/utillog/) | 構造化ログ | `NewLogger()` — `slog.Default` を JSON ハンドラ + LevelDebug で差し替え (各 binary の `init()` で 1 度だけ呼ぶ) |
 | [`utilcache`](src/utilcache/) | Redis アクセス | `NewClient(addr, pass)` (Ping 付き), `Cache` (prefix + 共通 TTL ラッパ), `(Cache).Set/Get/Del/MakeKey` |
-| [`utilgrpc`](src/utilgrpc/) | gRPC クライアント基盤 | `Dial(addr, opts...)` (functional options), `WithTLS` / `WithUnaryInterceptors` / `WithStreamInterceptors` / `WithDialOption`, `LoggingInterceptor` (アウトバウンド構造化アクセスログ) |
+| [`utilgrpc`](src/utilgrpc/) | gRPC クライアント基盤 | `Dial(addr, opts...)` (functional options), `WithUnaryInterceptors` / `WithStreamInterceptors` / `WithDialOption`, `LoggingInterceptor` (アウトバウンド構造化アクセスログ)。トランスポートは plaintext 固定 — mTLS は Istio Ambient (ztunnel HBONE) が担う |
 | [`utilotel`](src/utilotel/) | OpenTelemetry SDK 配線 | `Init(ctx, serviceName)` (`OTEL_*` 環境変数から TracerProvider + MeterProvider を構築。endpoint 未設定時は noop providers — propagator は常時走るので overhead はゼロではない), `HTTPMiddleware(serverName, opts...)` + `WithRequestFilter`, `GRPCServerOption()` / `GRPCClientOption()` (otelgrpc StatsHandler)。対応 router バージョンや PII / sampling の注意点は [`otel/README.md`](../../otel/README.md) 参照 |
 
 各サービスは上記をそのまま import するか、**自モジュールの `infra/<svc>client/` 配下に薄いラッパ** を置いてからその先で利用する (gRPC consumer pattern — 詳細は `coding-standards.md` §2 と [`CLAUDE.md`](../../CLAUDE.md) のリファレンス例)。

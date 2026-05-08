@@ -2,11 +2,15 @@
 // across services. The wire-level contract (proto + generated Go) lives in
 // shared/contract/<svc>/v1/; this package supplies the connection plumbing
 // every consumer would otherwise re-derive from grpc-go's defaults.
+//
+// Transport security: Dial uses plaintext (insecure.NewCredentials). mTLS
+// between services is provided by the Istio Ambient data plane (ztunnel
+// HBONE) at the platform layer — see deploy/k8s/istio.md. App-level TLS is
+// intentionally not exposed here.
 package utilgrpc
 
 import (
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -16,17 +20,9 @@ import (
 type Option func(*config)
 
 type config struct {
-	transportCreds     credentials.TransportCredentials
 	unaryInterceptors  []grpc.UnaryClientInterceptor
 	streamInterceptors []grpc.StreamClientInterceptor
 	extra              []grpc.DialOption
-}
-
-// WithTLS overrides the default plaintext transport with the given
-// credentials. Use credentials/credentials.NewTLS or NewClientTLSFromCert at
-// the call site.
-func WithTLS(creds credentials.TransportCredentials) Option {
-	return func(c *config) { c.transportCreds = creds }
 }
 
 // WithUnaryInterceptors appends client-side unary interceptors. Multiple
@@ -48,22 +44,21 @@ func WithDialOption(opts ...grpc.DialOption) Option {
 	return func(c *config) { c.extra = append(c.extra, opts...) }
 }
 
-// Dial constructs a gRPC client connection at addr with the project's
-// default options:
-//   - plaintext transport (dev / staging-internal). Override with WithTLS to
-//     switch.
+// Dial constructs a gRPC client connection at addr. Transport is plaintext;
+// in the Kubernetes deployment, Istio Ambient (ztunnel) wraps inter-pod
+// traffic with mTLS at the network layer.
 //
 // The returned ClientConn is lazy — grpc.NewClient does not block on TCP
 // handshake — so callers that want fast-fail behavior must add an explicit
 // connect deadline (e.g. WaitForReady on the call, or conn.WaitForStateChange).
 func Dial(addr string, opts ...Option) (*grpc.ClientConn, error) {
-	cfg := config{transportCreds: insecure.NewCredentials()}
+	var cfg config
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
 	dialOpts := []grpc.DialOption{
-		grpc.WithTransportCredentials(cfg.transportCreds),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}
 	if len(cfg.unaryInterceptors) > 0 {
 		dialOpts = append(dialOpts, grpc.WithChainUnaryInterceptor(cfg.unaryInterceptors...))

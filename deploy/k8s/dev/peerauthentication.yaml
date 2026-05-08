@@ -1,0 +1,17 @@
+# Dev mTLS posture: PERMISSIVE.
+#
+# Ambient enrolls audit / auth / queue namespaces; ztunnel encrypts traffic
+# between enrolled pods automatically (HBONE). PERMISSIVE means non-mTLS
+# clients (NodePort traffic into the gateway, kube-system probes, anything
+# not yet ambient-enrolled) keep working alongside.
+#
+# Production posture is STRICT — flip `mtls.mode` below once every caller is
+# verified to use mTLS. See ../istio.md §4 for the migration checklist.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: istio-system
+spec:
+  mtls:
+    mode: PERMISSIVE

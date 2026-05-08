@@ -43,11 +43,12 @@ type Client struct {
 	rpc  queuegrpc.QueueClient
 }
 
-// New dials addr via shared/utilgrpc (plaintext default; switch via
-// utilgrpc.WithTLS) and returns a ready-to-use Client. The OTel client
-// stats handler is prepended so trace context (W3C TraceContext) and
-// rpc.client.* metrics propagate audit→queue automatically; callers may
-// still pass additional options after.
+// New dials addr via shared/utilgrpc and returns a ready-to-use Client.
+// Transport is plaintext at the gRPC layer; mTLS between audit and queue
+// pods is provided by Istio Ambient (ztunnel HBONE) at the platform layer.
+// The OTel client stats handler is prepended so trace context (W3C
+// TraceContext) and rpc.client.* metrics propagate audit→queue
+// automatically; callers may still pass additional options after.
 func New(addr string, opts ...Option) (*Client, error) {
 	opts = append([]Option{utilotel.GRPCClientOption()}, opts...)
 	conn, err := utilgrpc.Dial(addr, opts...)

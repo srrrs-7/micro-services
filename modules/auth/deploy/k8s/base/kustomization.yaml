@@ -9,3 +9,4 @@ resources:
   - api-pdb.yaml
   - migrate-job.yaml
   - networkpolicy.yaml
+  - gateway.yaml

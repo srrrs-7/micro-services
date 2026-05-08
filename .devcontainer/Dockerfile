@@ -20,6 +20,18 @@ RUN ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
     && curl -fsSLo /usr/local/bin/kind "https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-${ARCH}" \
     && chmod +x /usr/local/bin/kind
 
+# istioctl (Ambient GA from 1.22; pin to a currently-supported 1.29.x).
+# Bumping versions only requires changing ISTIO_VERSION here — the Makefile
+# istio-* targets shell out to whatever istioctl is on PATH. Upstream support
+# window is ~3 minor versions; check istio.io/latest/docs/releases/supported-releases/
+# before bumping further.
+ARG ISTIO_VERSION=1.29.2
+RUN ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
+    && curl -fsSLo /tmp/istioctl.tar.gz "https://github.com/istio/istio/releases/download/${ISTIO_VERSION}/istioctl-${ISTIO_VERSION}-linux-${ARCH}.tar.gz" \
+    && tar -xzf /tmp/istioctl.tar.gz -C /usr/local/bin istioctl \
+    && chmod +x /usr/local/bin/istioctl \
+    && rm /tmp/istioctl.tar.gz
+
 USER vscode
 
 WORKDIR /workspace/main

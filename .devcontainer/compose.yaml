@@ -7,4 +7,15 @@ services:
       - ..:/workspace/main:cached
       # Share host docker socket so `docker` and `kind` work inside the dev container.
       - /var/run/docker.sock:/var/run/docker.sock
+      # Share Claude Code state (session JSONL, history, settings, credentials, plugins)
+      # with the host so `/resume` and CLI history survive container rebuilds and can be
+      # read from either side. ${HOME} expands to the host user's home at compose parse time.
+      - ${HOME}/.claude:/home/vscode/.claude
+    ports:
+      # Publish the auth Istio Gateway port-forward to the host so
+      # `curl http://localhost:8081/health` works from outside the
+      # dev container. Pairs with `--address 0.0.0.0` in the
+      # `istio-port-forward` Make target: docker-proxy DNATs to the
+      # container's eth0:8081, so the listener must bind 0.0.0.0, not lo.
+      - "8081:8081"
     command: sleep infinity

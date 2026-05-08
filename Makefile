@@ -220,7 +220,7 @@ K8S_IMAGES     := audit-api:.images/audit/api.Dockerfile \
                   auth-api:.images/auth/api.Dockerfile \
                   queue-api:.images/queue/Dockerfile \
                   migrator:.images/migrator/Dockerfile
-K8S_NAMESPACES := audit auth queue observability
+K8S_NAMESPACES := audit auth queue observability istio-system
 
 .PHONY: k8s-cluster k8s-kubeconfig k8s-build k8s-load k8s-apply k8s-up k8s-status k8s-down k8s-cluster-delete
 
@@ -262,7 +262,7 @@ k8s-apply: k8s-cluster ## Apply the dev kustomization (assumes images already bu
 	# being duplicated under deploy/k8s/.
 	kubectl kustomize --load-restrictor=LoadRestrictionsNone deploy/k8s/dev | kubectl apply -f -
 
-k8s-up: k8s-cluster k8s-build k8s-load k8s-apply ## Cluster + build + load + apply + wait + status
+k8s-up: k8s-cluster k8s-build k8s-load istio-up k8s-apply ## Cluster + build + load + istio + apply + wait + status
 	@echo "==> Waiting for stateful dependencies..."
 	-@kubectl -n auth  wait --for=condition=Ready  pod -l app.kubernetes.io/component=db    --timeout=120s
 	-@kubectl -n audit wait --for=condition=Ready  pod -l app.kubernetes.io/component=db    --timeout=120s
@@ -270,7 +270,14 @@ k8s-up: k8s-cluster k8s-build k8s-load k8s-apply ## Cluster + build + load + app
 	@echo "==> Waiting for migrate jobs..."
 	-@kubectl -n auth  wait --for=condition=complete job/auth-migrate  --timeout=180s
 	-@kubectl -n audit wait --for=condition=complete job/audit-migrate --timeout=180s
+	@echo "==> Waiting for Istio-provisioned auth gateway..."
+	-@kubectl -n auth wait --for=condition=Ready pod \
+	    -l gateway.networking.k8s.io/gateway-name=auth-gateway --timeout=120s
 	@$(MAKE) -s k8s-status
+	@echo ""
+	@echo "==> Smoke test:"
+	@echo "    1. shell A:  make istio-port-forward"
+	@echo "    2. shell B:  curl -i http://localhost:8081/health  # → 200 OK, server: istio-envoy"
 
 k8s-status: ## Show pods, services, and jobs across all service namespaces
 	@for ns in $(K8S_NAMESPACES); do \
@@ -283,6 +290,58 @@ k8s-down: ## Delete the dev kustomization (kind cluster stays up)
 
 k8s-cluster-delete: ## Delete the kind cluster entirely
 	-kind delete cluster --name $(K8S_CLUSTER)
+
+##@ Istio Ambient
+
+# Ambient mode: ztunnel (per-node L4 mTLS) + istio-cni (traffic redirect) +
+# istiod (control plane). north-south ingress is via the Gateway API
+# implementation, which is auto-provisioned per Gateway resource — see
+# modules/auth/deploy/k8s/base/gateway.yaml.
+#
+# `make k8s-up` calls istio-up between `k8s-load` and `k8s-apply` so the
+# Gateway API CRDs and Istio CRDs exist before the per-service overlays
+# (which include `Gateway` / `HTTPRoute` / `PeerAuthentication`) are applied.
+#
+# Gateway API CRDs are NOT installed by `istioctl install` — they must be
+# applied separately, BEFORE istiod boots, otherwise the Istio Gateway
+# controller in istiod silently skips reconciliation on startup.
+ISTIO_PROFILE       := ambient
+GATEWAY_API_VERSION := v1.2.0
+GATEWAY_API_URL     := https://github.com/kubernetes-sigs/gateway-api/releases/download/$(GATEWAY_API_VERSION)/standard-install.yaml
+
+.PHONY: istio-up istio-down istio-status istio-port-forward
+
+istio-up: k8s-cluster ## Install Gateway API CRDs + Istio Ambient (istiod + ztunnel + istio-cni)
+	@if ! command -v istioctl >/dev/null 2>&1; then \
+		echo "istioctl not on PATH — rebuild the devcontainer (see .devcontainer/Dockerfile)"; \
+		exit 1; \
+	fi
+	@echo "==> Installing Gateway API CRDs ($(GATEWAY_API_VERSION))..."
+	kubectl apply -f $(GATEWAY_API_URL)
+	istioctl install --set profile=$(ISTIO_PROFILE) -y
+	@echo "==> Waiting for istiod / ztunnel rollout..."
+	-@kubectl -n istio-system rollout status deploy/istiod      --timeout=180s
+	-@kubectl -n istio-system rollout status ds/ztunnel         --timeout=180s
+	-@kubectl -n istio-system rollout status ds/istio-cni-node  --timeout=180s
+
+istio-down: ## Uninstall Istio + Gateway API CRDs (purges istio-system)
+	-istioctl uninstall --purge -y
+	-kubectl delete -f $(GATEWAY_API_URL) --ignore-not-found
+	-kubectl delete namespace istio-system --ignore-not-found
+
+istio-status: ## Show istiod / ztunnel / istio-cni / gateway pod status
+	@kubectl -n istio-system get pods,svc -o wide
+	@echo ""
+	@kubectl get gatewayclass 2>/dev/null || echo "(Gateway API CRDs not installed)"
+	@echo ""
+	@kubectl -n auth get gateway,httproute -o wide 2>/dev/null
+
+istio-port-forward: ## Port-forward auth Gateway to host (canonical dev access path)
+	@echo "Port-forwarding auth-gateway → http://localhost:8081 (Ctrl-C to stop)"
+	@echo "Then in another shell: curl -i http://localhost:8081/health"
+	# --address 0.0.0.0 so the listener is reachable via docker-proxy when
+	# the dev container publishes 8081 to the host (.devcontainer/compose.yaml).
+	kubectl -n auth port-forward --address 0.0.0.0 svc/auth-gateway-istio 8081:80
 
 # Service stack targets — listed in the help footer, not via ##@.
 # Register every service target as .PHONY in one go.

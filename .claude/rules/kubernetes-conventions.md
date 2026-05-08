@@ -161,7 +161,7 @@ Tune in overlays for staging/prod — don't bake prod numbers into `base/`.
 ## 11. Adding a new service
 
 1. Create `modules/<svc>/deploy/k8s/{base,overlays/dev}/` mirroring an existing service. `auth/` is the most complete reference; `queue/` is the lightest.
-2. Add a `Namespace` resource named after the module.
+2. Add a `Namespace` resource named after the module. **Include the `istio.io/dataplane-mode: ambient` label** (§13).
 3. Add the new overlay path to `deploy/k8s/dev/kustomization.yaml`'s `resources:`.
 4. Add image(s) to the `K8S_IMAGES` Makefile variable.
 5. If the service produces cross-namespace traffic, write the egress rule in *its own* base, and add the matching ingress rule to the **target** namespace's base.
@@ -174,3 +174,37 @@ Tune in overlays for staging/prod — don't bake prod numbers into `base/`.
 - **Trying to use `commonLabels` for `app.kubernetes.io/name`**. See §4.
 - **Running `migrate hash` in the Job**. The Atlas image is read-only at runtime; hash must be done before image build.
 - **Centralizing manifests under `deploy/k8s/<svc>/`**. Per-service ownership under `modules/<svc>/deploy/` is the rule (§1).
+- **Re-introducing `utilgrpc.WithTLS` or app-level mTLS**. mTLS is provided by the mesh (§13). Adding TLS at the app layer overlaps with ztunnel HBONE and is a smell — discuss before doing so.
+
+## 13. Service mesh (Istio Ambient)
+
+The dev cluster runs **Istio Ambient mode** (Phase: 2026-05). The control plane (`istiod`), L4 data plane (`ztunnel`), and traffic-redirect plugin (`istio-cni-node`) are installed via `istioctl install --set profile=ambient` from `make istio-up`. They are NOT under kustomize — only the small custom CRs are checked in (`PeerAuthentication` + per-service `Gateway`/`HTTPRoute`).
+
+**Manifest location.** Istio's env-specific CRs (`PeerAuthentication` today; future `AuthorizationPolicy` / `Telemetry`) live directly under `deploy/k8s/<env>/` next to that env's `kustomization.yaml`:
+
+```
+deploy/k8s/
+├── istio.md                       # env-agnostic Istio doc
+├── dev/
+│   ├── kustomization.yaml
+│   └── peerauthentication.yaml    # PERMISSIVE
+└── (future stg/, prd/ — same shape with their own peerauthentication.yaml)
+```
+
+The `<component>/k8s/{base,overlays/<env>}/` shape used by per-service modules and `otel/` is **not** used here: Istio has no env-agnostic kustomize manifests (the control plane / ztunnel / istio-cni come from `istioctl install`, not kustomize). A `base/` would be empty and `overlays/<env>/` would nest under what is already an env-specific layer in `deploy/k8s/<env>/`. Putting CRs directly in `deploy/k8s/<env>/` keeps the env switch single-level.
+
+Per-service `Gateway` + `HTTPRoute` (or `GRPCRoute`) live in **the service's own `base/`** — e.g. `modules/auth/deploy/k8s/base/gateway.yaml`. There is no per-service NodePort sibling: dev host access goes through `make istio-port-forward` (kubectl port-forward to the auto-provisioned ClusterIP Service).
+
+**Required labels.** Every service `Namespace` MUST carry `istio.io/dataplane-mode: ambient` in its `metadata.labels`. Without it, ztunnel does not intercept traffic and mTLS is silently absent.
+
+**Gateway naming.** When adding a `Gateway` resource, use `<svc>-gateway` for the Gateway name and `<svc>-route` for the `HTTPRoute`/`GRPCRoute`. Istio auto-provisions a Service named `<svc>-gateway-istio` — do not attempt to create it yourself.
+
+**Host access (dev only).** The auth gateway is reachable from the host via `make istio-port-forward` (`kubectl port-forward svc/auth-gateway-istio 8081:80`). NodePort + kind `extraPortMappings` was tried and abandoned: kindnet ↔ Istio CNI iptables interaction silently drops external NodePort traffic. Production overlays go through a real LoadBalancer / external ingress in front of the auto-provisioned ClusterIP Service.
+
+**mTLS posture.** Default in dev is `PeerAuthentication.spec.mtls.mode: PERMISSIVE` (mesh-wide, in `istio-system`). Flip to `STRICT` only after verifying every caller is ambient-enrolled. See `deploy/k8s/istio.md` §4.
+
+**NetworkPolicy.** Keep existing NetworkPolicy. mTLS (Istio L4) and NetworkPolicy (k8s L3/4) are orthogonal — defense in depth. Do not delete NetworkPolicy on the basis that "Istio handles security now".
+
+**Telemetry.** Prometheus scrapes `istiod.istio-system.svc.cluster.local:15014` only (added in `otel/prometheus/prometheus.yml`). ztunnel per-pod metrics are deferred until a `kubernetes_sd_configs` + RBAC pass. The split: **app emits L7 (HTTP/gRPC RED + business attributes) via `utilotel`; mesh emits L4 (TCP / mTLS / control-plane health)**. Don't try to consolidate L7 into the mesh — `utilotel` already has richer span attributes than ztunnel could provide.
+
+**Compose.** Istio is k8s-only. The Compose path stays plaintext. Cross-stack TLS is intentionally not addressed.
