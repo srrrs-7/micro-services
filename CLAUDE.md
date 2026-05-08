@@ -79,13 +79,21 @@ Each service owns its k8s manifests under `modules/<svc>/deploy/k8s/{base,overla
 
 See `.claude/rules/kubernetes-conventions.md` for the binding manifest conventions and `deploy/k8s/README.md` for the full layout walkthrough.
 
+## Observability
+
+Telemetry is OpenTelemetry-native. Each binary calls `utilotel.Init` in `run()`, which sets up the global TracerProvider + MeterProvider from `OTEL_*` env vars and falls back to **noop providers** when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset — `make audit` / `make auth` stay zero-overhead in the default dev loop. HTTP services chain `utilotel.HTTPMiddleware(...)` plus the chi-specific `auth/route/middleware.RouteTag` (route-pattern retag); gRPC servers add `utilotel.GRPCServerOption()` ahead of the existing `ChainUnaryInterceptor`; outbound clients (canonical example `audit/infra/queueclient`) prepend `utilotel.GRPCClientOption()` so trace context propagates cross-service.
+
+The local dev stack lives at `otel/` and is opt-in via `make obs-up` (Compose `profiles: [obs]`): `otel-collector` (contrib) → Prometheus (`:9090`) + Tempo (`:3200`) + Loki (`:3100`) → Grafana (`:3000`, anonymous Admin) with cross-signal correlation pre-provisioned. `make obs-up` prints the `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317` line to export when re-running a service stack so telemetry actually flows. See `otel/README.md` for the architecture diagram, troubleshooting, and Phase 2/3 (richer dashboards, alert rules, logs producer) / Phase 4 (k8s overlays under `deploy/k8s/observability/`) roadmap.
+
 ## Detailed Rules
 
-The following files contain the full coding standards, testing policy, and k8s conventions for this repo. Treat them as binding for any change you author here.
+The following files contain the full development workflow, coding standards, testing policy, k8s conventions, and AI agent implementation rules for this repo. Treat them as binding for any change you author here.
 
+@.claude/rules/development-workflow.md
 @.claude/rules/coding-standards.md
 @.claude/rules/testing.md
 @.claude/rules/kubernetes-conventions.md
+@.claude/rules/ai-agent.md
 
 ## Per-service design docs
 
