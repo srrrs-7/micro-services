@@ -1,12 +1,14 @@
 # Dev mTLS posture: PERMISSIVE.
 #
-# Ambient enrolls audit / auth / queue namespaces; ztunnel encrypts traffic
-# between enrolled pods automatically (HBONE). PERMISSIVE means non-mTLS
-# clients (NodePort traffic into the gateway, kube-system probes, anything
-# not yet ambient-enrolled) keep working alongside.
+# Ambient enrolls audit / auth / queue / observability namespaces; ztunnel
+# encrypts traffic between enrolled pods automatically (HBONE). PERMISSIVE
+# means non-mTLS clients (kube-system probes, anything not yet ambient-
+# enrolled) keep working alongside.
 #
-# Production posture is STRICT — flip `mtls.mode` below once every caller is
-# verified to use mTLS. See ../istio.md §4 for the migration checklist.
+# BINDING REQUIREMENT: staging / prod の peerauthentication.yaml は必ず
+# `mode: STRICT` で commit する。PERMISSIVE は dev 専用であり、本番経路で
+# plaintext fall-through を残すと L4 暗号化の保証が崩れる。STRICT 移行
+# checklist は ../istio.md §4 を参照。
 apiVersion: security.istio.io/v1
 kind: PeerAuthentication
 metadata:

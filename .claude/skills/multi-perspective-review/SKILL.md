@@ -251,6 +251,25 @@ Write this exact shape — an actionable checklist FIRST so the user can act on 
 
 The actionable checklist (§1) is the load-bearing section — keep it scannable. Group items in §1.1 for "the user can act on this in this conversation/PR" and §1.2 for "needs separate follow-up". Place `refactoring-reviewer`'s proposals in §1.3 — they are advisory and follow a different format (cost / test-impact columns).
 
+### What NOT to persist (PII / secret hygiene)
+
+`doc/review/` is committed to git and surfaces in `git log` / `git blame` indefinitely. Before writing the file, scan the brief AND the agent reports for:
+
+- Real email addresses (use `[email]` placeholder)
+- Phone numbers, postal addresses, government IDs (`[pii]`)
+- Credentials: API keys, OAuth tokens, JWT-shaped strings, AWS access keys (`AKIA*` / `ASIA*`), private-key headers (`-----BEGIN ...PRIVATE KEY-----`), passwords, DB connection strings with embedded credentials (`[redacted]`)
+- Internal-only endpoint URLs (replace host with `[internal]`)
+- Customer or user data appearing in test fixtures
+
+If found, replace with the placeholder before writing. The original review brief and agent reports stay in conversation context (ephemeral) — only the redacted form lands in `doc/review/`. If the agent reports themselves quote something sensitive, edit the verbatim block to redact before persisting (this is the one place where editing agent output is sanctioned).
+
+When in doubt: keep it out of the file, surface it only in the chat summary, and link to a non-public artifact (Slack thread, Linear issue) for follow-up.
+
+### Retention
+
+- `doc/review/` is append-only by convention; old files are historical record. Do NOT amend or delete past entries during a normal review run — they describe the project at a point in time.
+- A periodic cleanup pass (every ~6 months) MAY prune review files older than 12 months provided the conclusions have been folded into `.claude/rules/*` or per-module `CLAUDE.md`. That pruning is a separate, explicitly-requested task — not something this skill does.
+
 ### When the file write fails
 
 If `Write` fails (permission, disk full, etc.), surface the error in the chat reply alongside the summary. Don't silently drop the persistence. The chat output is the fallback record; tell the user the file path you tried so they can re-create the file from the chat content if they want.

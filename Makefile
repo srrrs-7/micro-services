@@ -222,7 +222,7 @@ K8S_IMAGES     := audit-api:.images/audit/api.Dockerfile \
                   migrator:.images/migrator/Dockerfile
 K8S_NAMESPACES := audit auth queue observability istio-system
 
-.PHONY: k8s-cluster k8s-kubeconfig k8s-build k8s-load k8s-apply k8s-up k8s-status k8s-down k8s-cluster-delete
+.PHONY: k8s-cluster k8s-kubeconfig k8s-build k8s-load k8s-apply k8s-up k8s-wait-ready k8s-status k8s-down k8s-cluster-delete
 
 k8s-cluster: ## Create the kind cluster (idempotent)
 	@kind get clusters 2>/dev/null | grep -qx $(K8S_CLUSTER) || kind create cluster --name $(K8S_CLUSTER)
@@ -262,7 +262,19 @@ k8s-apply: k8s-cluster ## Apply the dev kustomization (assumes images already bu
 	# being duplicated under deploy/k8s/.
 	kubectl kustomize --load-restrictor=LoadRestrictionsNone deploy/k8s/dev | kubectl apply -f -
 
-k8s-up: k8s-cluster k8s-build k8s-load istio-up k8s-apply ## Cluster + build + load + istio + apply + wait + status
+k8s-up: k8s-cluster k8s-build k8s-load istio-up k8s-apply k8s-wait-ready ## Cluster + build + load + istio + apply + wait + status
+	@$(MAKE) -s k8s-status
+	@echo ""
+	@echo "==> Smoke test:"
+	@echo "    1. shell A:  make istio-port-forward"
+	@echo "    2. shell B:  curl -i http://localhost:8081/health  # → 200 OK, server: istio-envoy"
+
+# ADVISORY waits — `-@` ignores exit codes so a slow rollout does not abort
+# the make recipe; the trailing `make k8s-status` shows whatever actually
+# came up. If a wait fails, k8s-up still exits 0 — inspect k8s-status output.
+# (The Istio control-plane rollouts under `istio-up` are NON-advisory; see
+# istio-up.)
+k8s-wait-ready: ## Wait for stateful services, jobs, and gateway after k8s-apply
 	@echo "==> Waiting for stateful dependencies..."
 	-@kubectl -n auth  wait --for=condition=Ready  pod -l app.kubernetes.io/component=db    --timeout=120s
 	-@kubectl -n audit wait --for=condition=Ready  pod -l app.kubernetes.io/component=db    --timeout=120s
@@ -273,11 +285,6 @@ k8s-up: k8s-cluster k8s-build k8s-load istio-up k8s-apply ## Cluster + build + l
 	@echo "==> Waiting for Istio-provisioned auth gateway..."
 	-@kubectl -n auth wait --for=condition=Ready pod \
 	    -l gateway.networking.k8s.io/gateway-name=auth-gateway --timeout=120s
-	@$(MAKE) -s k8s-status
-	@echo ""
-	@echo "==> Smoke test:"
-	@echo "    1. shell A:  make istio-port-forward"
-	@echo "    2. shell B:  curl -i http://localhost:8081/health  # → 200 OK, server: istio-envoy"
 
 k8s-status: ## Show pods, services, and jobs across all service namespaces
 	@for ns in $(K8S_NAMESPACES); do \
@@ -305,7 +312,22 @@ k8s-cluster-delete: ## Delete the kind cluster entirely
 # Gateway API CRDs are NOT installed by `istioctl install` — they must be
 # applied separately, BEFORE istiod boots, otherwise the Istio Gateway
 # controller in istiod silently skips reconciliation on startup.
+#
+# ISTIO_VERSION pins the istioctl binary baked into the devcontainer (see
+# .devcontainer/Dockerfile ARG ISTIO_VERSION). The Makefile shells out to
+# whatever istioctl is on PATH; the variable is informational + used for a
+# warning when the PATH binary differs. Bumping istio: change BOTH this
+# variable AND .devcontainer/Dockerfile, then rebuild the devcontainer.
+#
+# Gateway API CRDs are fetched from the upstream GitHub release at install
+# time (see GATEWAY_API_URL). Bumping the Gateway API version: change
+# GATEWAY_API_VERSION here only — the CRDs come from the upstream release
+# tag, no devcontainer change needed. Fragility note: the fetch goes over
+# the public internet and has no checksum verification today; if GitHub is
+# unreachable, `make istio-up` fails until retry. Vendoring the CRDs is a
+# future hardening step.
 ISTIO_PROFILE       := ambient
+ISTIO_VERSION       := 1.29.2
 GATEWAY_API_VERSION := v1.2.0
 GATEWAY_API_URL     := https://github.com/kubernetes-sigs/gateway-api/releases/download/$(GATEWAY_API_VERSION)/standard-install.yaml
 
@@ -316,13 +338,22 @@ istio-up: k8s-cluster ## Install Gateway API CRDs + Istio Ambient (istiod + ztun
 		echo "istioctl not on PATH — rebuild the devcontainer (see .devcontainer/Dockerfile)"; \
 		exit 1; \
 	fi
+	@actual=$$(istioctl version --remote=false --short 2>/dev/null | head -n1); \
+	if [ -n "$$actual" ] && [ "$$actual" != "$(ISTIO_VERSION)" ]; then \
+		echo "warning: istioctl $$actual differs from pinned ISTIO_VERSION=$(ISTIO_VERSION) (.devcontainer/Dockerfile). Rebuild the devcontainer to align."; \
+	fi
 	@echo "==> Installing Gateway API CRDs ($(GATEWAY_API_VERSION))..."
 	kubectl apply -f $(GATEWAY_API_URL)
 	istioctl install --set profile=$(ISTIO_PROFILE) -y
 	@echo "==> Waiting for istiod / ztunnel rollout..."
-	-@kubectl -n istio-system rollout status deploy/istiod      --timeout=180s
-	-@kubectl -n istio-system rollout status ds/ztunnel         --timeout=180s
-	-@kubectl -n istio-system rollout status ds/istio-cni-node  --timeout=180s
+	@# NON-advisory: rollout failures abort here so k8s-apply does not run
+	@# against a half-installed mesh (gateway resources would silently fail
+	@# to reconcile). Drop the `@` if you need to ignore (e.g. partial
+	@# upgrade scenarios) — but k8s-apply will then proceed with a broken
+	@# control plane.
+	@kubectl -n istio-system rollout status deploy/istiod      --timeout=180s
+	@kubectl -n istio-system rollout status ds/ztunnel         --timeout=180s
+	@kubectl -n istio-system rollout status ds/istio-cni-node  --timeout=180s
 
 istio-down: ## Uninstall Istio + Gateway API CRDs (purges istio-system)
 	-istioctl uninstall --purge -y

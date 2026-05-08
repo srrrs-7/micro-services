@@ -10,6 +10,17 @@ services:
       # Share Claude Code state (session JSONL, history, settings, credentials, plugins)
       # with the host so `/resume` and CLI history survive container rebuilds and can be
       # read from either side. ${HOME} expands to the host user's home at compose parse time.
+      #
+      # SECURITY NOTE: this mount includes ~/.claude/.credentials.json (Anthropic OAuth
+      # token). Code running inside this devcontainer — including every sub-agent
+      # spawned by /multi-perspective-review and similar skills — can read it. The
+      # devcontainer also shares /var/run/docker.sock and publishes port 8081, so a
+      # prompt-injection or compromised tool inside the container could exfiltrate the
+      # token. Mitigations: do NOT use the published 8081 port from a public network;
+      # in shared cloud dev environments (Codespaces) keep port visibility "private".
+      # A future hardening step is to scope this mount to writeable subpaths
+      # (~/.claude/projects, ~/.claude/todos, ~/.claude/history) and inject the
+      # credentials via an out-of-band secret instead of a bind-mount.
       - ${HOME}/.claude:/home/vscode/.claude
     ports:
       # Publish the auth Istio Gateway port-forward to the host so

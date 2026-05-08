@@ -2,9 +2,9 @@
 #
 # `gatewayClassName: istio` makes Istio (installed via `make istio-up`)
 # the implementation. Istio auto-provisions a Deployment + ClusterIP
-# Service named `auth-gateway-istio` in this namespace; the dev overlay
-# adds a NodePort Service alongside so kind's extraPortMapping (host
-# :8081 → node :30080) reaches it.
+# Service named `auth-gateway-istio` in this namespace.
+# Dev host access is via `make istio-port-forward` — NodePort + kind
+# extraPortMappings was tried and abandoned, see `deploy/k8s/istio.md` §3.
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:

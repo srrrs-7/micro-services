@@ -3,6 +3,5 @@ kind: Namespace
 metadata:
   name: auth
   labels:
-    # Ambient enrollment: ztunnel intercepts traffic for pods in this ns and
-    # encrypts inter-pod traffic via HBONE. Pods need no sidecar.
+    # Ambient enrollment — see deploy/k8s/istio.md §1.
     istio.io/dataplane-mode: ambient

@@ -5,3 +5,7 @@ metadata:
   labels:
     app.kubernetes.io/name: observability
     app.kubernetes.io/managed-by: kustomize
+    # Ambient enrollment — see deploy/k8s/istio.md §1.
+    # Without this label, app pod → otel-collector traffic is plaintext
+    # in PERMISSIVE *and* STRICT (ztunnel never intercepts unenrolled ns).
+    istio.io/dataplane-mode: ambient

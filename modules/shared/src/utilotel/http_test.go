@@ -124,35 +124,56 @@ func TestHTTPMiddleware_spanNameUsesRequestPattern(t *testing.T) {
 	}
 }
 
-func TestHTTPMiddleware_spanNameFallsBackToServerNameWithoutPattern(t *testing.T) {
-	// http.HandleFunc("/foo", ...) without method+pattern syntax leaves
-	// r.Pattern as "" — the formatter should fall back to the serverName
-	// passed to HTTPMiddleware.
-	rec := installRecordingTracer(t)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/foo", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-
-	srv := httptest.NewServer(HTTPMiddleware("test-server")(mux))
-	t.Cleanup(srv.Close)
-
-	resp, err := http.Get(srv.URL + "/foo")
-	if err != nil {
-		t.Fatalf("GET /foo: %v", err)
+// TestSpanNameFromPattern exercises the three branches of the
+// SpanNameFormatter directly — the through-otelhttp test path can only
+// drive the stdlib ServeMux behavior (which always populates r.Pattern),
+// so the empty-pattern fallback and the chi-style path-only form need
+// targeted coverage at the function level.
+func TestSpanNameFromPattern(t *testing.T) {
+	cases := []struct {
+		name      string
+		method    string
+		pattern   string
+		operation string
+		want      string
+	}{
+		{
+			name:      "empty pattern falls back to operation",
+			method:    http.MethodGet,
+			pattern:   "",
+			operation: "test-server",
+			want:      "test-server",
+		},
+		{
+			name:      "stdlib ServeMux method-prefixed pattern passes through",
+			method:    http.MethodGet,
+			pattern:   "GET /users/{id}",
+			operation: "ignored",
+			want:      "GET /users/{id}",
+		},
+		{
+			name:      "chi-style path-only pattern gets method prepended",
+			method:    http.MethodGet,
+			pattern:   "/users/{id}",
+			operation: "ignored",
+			want:      "GET /users/{id}",
+		},
+		{
+			name:      "POST chi-style path-only pattern",
+			method:    http.MethodPost,
+			pattern:   "/users",
+			operation: "ignored",
+			want:      "POST /users",
+		},
 	}
-	_ = resp.Body.Close()
-
-	spans := rec.Ended()
-	if len(spans) != 1 {
-		t.Fatalf("got %d spans, want 1", len(spans))
-	}
-	// Without a templated pattern stdlib ServeMux still sets r.Pattern to
-	// the registered route ("/foo"), so the formatter produces
-	// "GET /foo" rather than the serverName fallback. Either form is a
-	// meaningful name; assert that we did NOT keep the seed-time
-	// "test-server" name.
-	if name := spans[0].Name(); name == "test-server" {
-		t.Errorf("span name = %q, want either %q or %q", name, "GET /foo", "test-server (only when r.Pattern is empty)")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &http.Request{Method: tc.method, Pattern: tc.pattern}
+			if got := spanNameFromPattern(tc.operation, r); got != tc.want {
+				t.Errorf("spanNameFromPattern(%q, &Request{Method:%q, Pattern:%q}) = %q, want %q",
+					tc.operation, tc.method, tc.pattern, got, tc.want)
+			}
+		})
 	}
 }
 

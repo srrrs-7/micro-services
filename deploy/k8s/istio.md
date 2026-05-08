@@ -2,6 +2,13 @@
 
 このリポジトリの k8s デプロイに **Istio Ambient mode** を導入し、east-west の自動 mTLS と north-south の入口 (Gateway API) を 1 スタックで担う。Compose 経路は対象外 (Istio は k8s-only)。
 
+## 0. 採用判断サマリ
+
+- **採用理由**: app-level mTLS (`utilgrpc.WithTLS` 等) を全サービスに敷くと運用コスト (証明書配布 / ローテ) が高い。mesh が L4 暗号化 + 証明書ライフサイクルを引き受けるなら、サービスコード側は plaintext に揃えて mTLS の責務を外せる。
+- **なぜ Ambient (sidecar 不採用)**: sidecar mode は pod ごとに Envoy をぶら下げる ─ kind dev クラスタで実体感ある overhead。Ambient は per-node ztunnel + iptables redirect で同等の L4 mTLS を ~30MB/node で実現でき、L7 ポリシーが要るタイミングで waypoint を namespace 単位で足せばよい。
+- **段階導入 (Phase 1-4)**: Phase 1 = istiod + ztunnel + Gateway API CRD + auth-gateway / Phase 2 = istiod scrape + Grafana / Phase 3 = STRICT + AuthorizationPolicy / Phase 4 = waypoint (L7 ポリシーが必要な namespace のみ)。本ドキュメントは Phase 1 完了時点。
+- **app 側のコード変更**: `shared/utilgrpc.WithTLS` を削除し plaintext を unconditional 化。`utilotel` は変更なし (L7 spans + RED は app, L4 mTLS は mesh)。
+
 ## 1. 構成要素
 
 | コンポーネント | 種別 | 役割 | 備考 |
@@ -84,6 +91,8 @@ prod / staging では Istio Gateway の auto-provisioned `auth-gateway-istio` Se
 | `PERMISSIVE` (dev 既定) | mTLS と plaintext を共存可能 | 段階移行中、検証中 |
 | `STRICT` (prod 想定) | ambient 外からの plaintext を拒否 | 全 caller を ambient 検証完了後 |
 
+> **Binding requirement**: staging / prod の `peerauthentication.yaml` は `mode: STRICT` でなければならない。`PERMISSIVE` は dev のみ。staging/prod overlay を作成する際は STRICT で commit すること (本ドキュメント §4.1 が決定根拠)。
+
 ### STRICT 移行手順
 
 1. `make k8s-up` で PERMISSIVE 状態で起動
@@ -97,9 +106,10 @@ prod / staging では Istio Gateway の auto-provisioned `auth-gateway-istio` Se
    ```
 3. ファイル編集: `mtls.mode: PERMISSIVE` → `mtls.mode: STRICT`
 4. 再 apply: `kubectl apply -k deploy/k8s/dev` (env-specific `peerauthentication.yaml` がそこに居る)
-5. **回帰チェック**: NodePort 経由のホスト到達が継続するか確認 (gateway pod が ambient 経由で auth-api に到達できているか)
+5. **回帰チェック**: ホスト到達が継続するか確認 (gateway pod が ambient 経由で auth-api に到達できているか)。dev では `make istio-port-forward` 経由で smoke-test:
    ```bash
-   curl -i http://localhost:8081/health
+   make istio-port-forward          # 別シェル
+   curl -fsS http://localhost:8081/health   # → 200 OK
    ```
 
 ロールバック: PERMISSIVE に戻して再 apply。
@@ -204,7 +214,7 @@ kubectl -n istio-system get peerauthentication default -o jsonpath='{.spec.mtls.
 
 ## 10. 関連ドキュメント
 
-- 上位の Istio 採用判断と段階導入計画は会話履歴を参照
+- 採用判断 / 段階導入計画は本ドキュメント §0
 - `.claude/rules/kubernetes-conventions.md` §13 — Service Mesh の binding rules
 - `deploy/k8s/README.md` §5.1 — LB / 入口の上位設計
 - `otel/README.md` — 観測スタックとの境界

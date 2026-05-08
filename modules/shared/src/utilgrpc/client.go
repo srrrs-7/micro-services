@@ -1,7 +1,8 @@
 // Package utilgrpc collects the small set of gRPC client primitives shared
-// across services. The wire-level contract (proto + generated Go) lives in
-// shared/contract/<svc>/v1/; this package supplies the connection plumbing
-// every consumer would otherwise re-derive from grpc-go's defaults.
+// across services. Per-service wire-level contracts (proto + generated Go)
+// live in modules/<svc>/src/route/grpc/; this package supplies the
+// connection plumbing every consumer would otherwise re-derive from
+// grpc-go's defaults.
 //
 // Transport security: Dial uses plaintext (insecure.NewCredentials). mTLS
 // between services is provided by the Istio Ambient data plane (ztunnel
@@ -13,6 +14,12 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+// plaintextTransport is the only transport-credential value Dial ever
+// applies. Lifted to a package-level var so the "always plaintext" invariant
+// is grep-visible at one place rather than buried inside Dial. mTLS is the
+// mesh's responsibility (see package doc).
+var plaintextTransport = grpc.WithTransportCredentials(insecure.NewCredentials())
 
 // Option configures a Dial call. Construct values via the WithXxx helpers
 // below — the underlying config is intentionally unexported so callers cannot
@@ -57,9 +64,7 @@ func Dial(addr string, opts ...Option) (*grpc.ClientConn, error) {
 		opt(&cfg)
 	}
 
-	dialOpts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	}
+	dialOpts := []grpc.DialOption{plaintextTransport}
 	if len(cfg.unaryInterceptors) > 0 {
 		dialOpts = append(dialOpts, grpc.WithChainUnaryInterceptor(cfg.unaryInterceptors...))
 	}

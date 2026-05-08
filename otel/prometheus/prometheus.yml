@@ -22,6 +22,17 @@ scrape_configs:
   # this as a down target because there is no istiod outside k8s; ignore).
   # Cross-ns DNS works because Prometheus runs in the observability ns and
   # the istio-system Service is cluster-DNS reachable.
+  #
+  # Auth: dev は plain HTTP scrape で OK (`/metrics` は istiod が認証なしで
+  # 公開)。staging/prod 昇格時は projected ServiceAccount token を使った
+  # bearer 認証 + AuthorizationPolicy で istiod:15014 を保護すること。
+  # 必要になったら以下を追加:
+  #   authorization:
+  #     type: Bearer
+  #     credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+  #   tls_config:
+  #     ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+  #     server_name: istiod.istio-system.svc
   - job_name: istiod
     static_configs:
       - targets: ["istiod.istio-system.svc.cluster.local:15014"]
