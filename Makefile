@@ -162,7 +162,14 @@ obs-status: ## Show obs container status
 
 ##@ Docker hygiene
 
-.PHONY: rmi rmv
+.PHONY: down nuke rmi rmv
+
+down: ## Stop & remove EVERY container from this Compose project (services + obs)
+	docker-compose $(COMPOSE_FILES) down --remove-orphans
+
+nuke: ## `make down` + drop named volumes (audit-db, auth-db, prom/tempo/loki/grafana data)
+	docker-compose $(COMPOSE_FILES) down --remove-orphans --volumes
+
 rmi: ## Prune dangling Docker images
 	docker image prune -f
 
