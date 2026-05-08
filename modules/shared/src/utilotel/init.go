@@ -95,7 +95,7 @@ func Init(ctx context.Context, serviceName string) (func(context.Context) error,
 
 	// Phase 3 (logs via otelslog bridge) is on hold: go.opentelemetry.io/
 	// otel/sdk/log@v0.19 segfaults inside its sync.Pool.getSlow path on
-	// the first attribute-bearing record under Go 1.26.2. Logs continue
+	// the first attribute-bearing record under Go 1.26.3. Logs continue
 	// to flow to stdout via shared/utillog; Loki ingest sits idle until
 	// either sdk/log stabilizes or we pivot to a filelog receiver.
 	// installSlogBridge (shared/utilotel/slog.go) and the teeHandler are

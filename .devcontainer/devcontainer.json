@@ -5,49 +5,41 @@
 // - Use setup.sh to run commands that don't need to be cached
 // - Use setup.personal.sh for personal setup such as dotfiles
 {
-  "name": "Go Microservices Dev Container",
-  "dockerComposeFile": [
-    "compose.yaml"
-  ],
-  "service": "dev",
-  "workspaceFolder": "/workspace/main",
-  "remoteUser": "vscode",
-  "features": {
-    "ghcr.io/devcontainers/features/git:1": {},
-    "ghcr.io/devcontainers/features/github-cli:1": {},
-    "ghcr.io/devcontainers/features/go": {
-      "version": "1.26",
-      "golangciLintVersion": "2.11.3"
-    },
-    "ghcr.io/devcontainers/features/terraform:1": {},
-    "ghcr.io/devcontainers/features/aws-cli:1": {}
-  },
-  "customizations": {
-    "vscode": {
-      "extensions": [
-        "golang.go"
-      ],
-      "settings": {
-        "editor.formatOnSave": true,
-        "go.useLanguageServer": true,
-        "go.toolsManagement.autoUpdate": false,
-        "go.lintTool": "golangci-lint",
-        "go.lintFlags": ["--fast-only"],
-        "gopls": {
-          "build.directoryFilters": [
-            "-modules/auth/src/infra/database/db",
-            "-modules/audit/src/infra/database/db",
-            "-modules/audit/src/route/grpc",
-            "-modules/queue/src/route/grpc"
-          ],
-          "ui.semanticTokens": true,
-          "ui.completion.usePlaceholders": true,
-          "formatting.gofumpt": false
-        }
-      }
-    }
-  },
-  "postCreateCommand": "chmod +x .devcontainer/setup.sh && sudo .devcontainer/setup.sh",
-  "postStartCommand": "for m in auth audit queue shared; do (cd /workspace/main/modules/$m/src && go build ./... >/dev/null 2>&1); done; gopls version",
-  "forwardPorts": []
+	"name": "Go Microservices Dev Container",
+	"dockerComposeFile": ["compose.yaml"],
+	"service": "dev",
+	"workspaceFolder": "/workspace/main",
+	"remoteUser": "vscode",
+	"features": {
+		"ghcr.io/devcontainers/features/git:1": {},
+		"ghcr.io/devcontainers/features/github-cli:1": {},
+		"ghcr.io/devcontainers/features/terraform:1": {},
+		"ghcr.io/devcontainers/features/aws-cli:1": {}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": ["golang.go"],
+			"settings": {
+				"editor.formatOnSave": true,
+				"go.useLanguageServer": true,
+				"go.toolsManagement.autoUpdate": false,
+				"go.lintTool": "golangci-lint",
+				"go.lintFlags": ["--fast-only"],
+				"gopls": {
+					"build.directoryFilters": [
+						"-modules/auth/src/infra/database/db",
+						"-modules/audit/src/infra/database/db",
+						"-modules/audit/src/route/grpc",
+						"-modules/queue/src/route/grpc"
+					],
+					"ui.semanticTokens": true,
+					"ui.completion.usePlaceholders": true,
+					"formatting.gofumpt": false
+				}
+			}
+		}
+	},
+	"postCreateCommand": "chmod +x .devcontainer/setup.sh && sudo .devcontainer/setup.sh",
+	"postStartCommand": "for m in auth audit queue shared; do (cd /workspace/main/modules/$m/src && go build ./... >/dev/null 2>&1); done; gopls version",
+	"forwardPorts": []
 }

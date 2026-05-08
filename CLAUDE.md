@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Layout
 
-A Go workspace (`modules/go.work`, Go 1.26.0) containing four modules under `modules/`:
+A Go workspace (`modules/go.work`, Go 1.26.3) containing four modules under `modules/`:
 
 - `audit/src` — audit service exposing a gRPC API (proto: `modules/audit/src/route/grpc/audit.proto`), split into `cmd/api` and `cmd/worker` entry points
 - `auth/src` — auth service (HTTP API only), backed by Postgres + Redis cache

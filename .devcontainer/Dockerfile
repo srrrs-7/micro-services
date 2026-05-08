@@ -20,11 +20,7 @@ RUN ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
     && curl -fsSLo /usr/local/bin/kind "https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-${ARCH}" \
     && chmod +x /usr/local/bin/kind
 
-# istioctl (Ambient GA from 1.22; pin to a currently-supported 1.29.x).
-# Bumping versions only requires changing ISTIO_VERSION here — the Makefile
-# istio-* targets shell out to whatever istioctl is on PATH. Upstream support
-# window is ~3 minor versions; check istio.io/latest/docs/releases/supported-releases/
-# before bumping further.
+# istioctl
 ARG ISTIO_VERSION=1.29.2
 RUN ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
     && curl -fsSLo /tmp/istioctl.tar.gz "https://github.com/istio/istio/releases/download/${ISTIO_VERSION}/istioctl-${ISTIO_VERSION}-linux-${ARCH}.tar.gz" \
@@ -32,8 +28,21 @@ RUN ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
     && chmod +x /usr/local/bin/istioctl \
     && rm /tmp/istioctl.tar.gz
 
-USER vscode
+# ┌─────────────────────────────────────────────────────────────────┐
+# │ Go toolchain — /usr/local/go に入れて devcontainer Feature と   │
+# │ 同じパスに統一することで Feature による上書きを防ぐ              │
+# └─────────────────────────────────────────────────────────────────┘
+ARG GO_VERSION=1.26.3
+RUN ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
+    && curl -fsSLo /tmp/go.tar.gz "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" \
+    && rm -rf /usr/local/go \
+    && tar -C /usr/local -xzf /tmp/go.tar.gz \
+    && rm /tmp/go.tar.gz
 
+ENV GOROOT="/usr/local/go"
+ENV PATH="${GOROOT}/bin:/usr/local/bin:${PATH}"
+
+USER vscode
 WORKDIR /workspace/main
 
 # Install claude code
@@ -43,22 +52,19 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 RUN curl -sSf https://atlasgo.sh | sh
 
 # golangci-lint installation
-RUN curl -sSfL https://golangci-lint.run/install.sh  | sh -s -- -b ~/.local/bin
+RUN curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b ~/.local/bin
 
 # go orm sqlc installation
-RUN curl -L "$(curl -s https://api.github.com/repos/sqlc-dev/sqlc/releases/latest | grep "browser_download_url.*$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | cut -d '"' -f 4)" | tar xz -C ~/.local/bin
+RUN curl -L "$(curl -s https://api.github.com/repos/sqlc-dev/sqlc/releases/latest \
+      | grep "browser_download_url.*$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m \
+      | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" \
+      | cut -d '"' -f 4)" \
+    | tar xz -C ~/.local/bin
 
-# Go toolchain. Pinned to match modules/go.work and devcontainer.json's go feature.
-# Required because devcontainer Features are not applied by `docker compose build`,
-# so the protoc-plugin step below would otherwise fail with `go: not found`.
-ARG GO_VERSION=1.26.0
-RUN ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
-    && curl -fsSLo /tmp/go.tar.gz "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" \
-    && tar -C "$HOME/.local" -xzf /tmp/go.tar.gz \
-    && rm /tmp/go.tar.gz
-ENV PATH="/home/vscode/.local/go/bin:/home/vscode/.local/bin:${PATH}"
+ENV GOPATH="/home/vscode/go"
+ENV PATH="${GOPATH}/bin:${HOME}/.local/bin:${PATH}"
 
-# protoc + Go plugins (queue gRPC). Versions pinned; bump together when upgrading.
+# protoc + Go plugins
 ARG PROTOC_VERSION=28.3
 ARG PROTOC_GEN_GO_VERSION=v1.34.2
 ARG PROTOC_GEN_GO_GRPC_VERSION=v1.5.1
@@ -67,5 +73,6 @@ RUN ARCH=$(uname -m | sed 's/x86_64/x86_64/;s/aarch64/aarch_64/') \
     && unzip -oq /tmp/protoc.zip -d ~/.local/protoc \
     && ln -sf ~/.local/protoc/bin/protoc ~/.local/bin/protoc \
     && rm /tmp/protoc.zip
+
 RUN GOBIN=$HOME/.local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GEN_GO_VERSION} \
     && GOBIN=$HOME/.local/bin go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GEN_GO_GRPC_VERSION}
