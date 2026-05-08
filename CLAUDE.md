@@ -11,9 +11,24 @@ A Go workspace (`modules/go.work`, Go 1.26.0) containing four modules under `mod
 - `queue/src` — queue service exposing a gRPC API (proto: `modules/queue/src/route/grpc/queue.proto`)
 - `shared/src` — cross-service helpers: `utilhttp` (typed `AppError` + JSON request/response helpers), `utillog` (slog JSON logger), `utilcache` (Redis client + prefixed `Cache` wrapper), `utilgrpc` (gRPC `Dial` with functional options for client interceptors + an outbound logging interceptor; transport is plaintext only — mTLS is the mesh's job), and `utilotel` (`Init` for the global TracerProvider + MeterProvider, `HTTPMiddleware` for chi, `GRPCServerOption` / `GRPCClientOption` for the otelgrpc StatsHandler). Service-specific gRPC client wrappers do NOT live here — see the gRPC consumer pattern below.
 
-Each service module follows the same internal layout: `cmd/<binary>/main.go` wires env → infra → service → route, while the layers live under `domain/` (entities, inputs), `service/` (business logic over `db.Querier`), `infra/database/` (sqlc + migrations), and `route/` (chi HTTP router for `auth`; gRPC `server.go` + `handler.go` + `interceptor/` for `audit` / `queue`). Cache access (Redis) is provided by `shared/utilcache` and consumed directly from `cmd/<binary>/main.go` — no per-service `infra/cache/` directory. Every binary calls `utilotel.Init(ctx, "<service-name>")` early in `run()` and flushes the returned shutdown ahead of DB / cache close so in-flight spans + metrics reach the Collector while the network is still up.
+Each service module follows the same internal layout: `cmd/<binary>/main.go` wires env → infra → service → route, while the layers live under `domain/` (entities, inputs), `service/` (business logic over `db.Querier`), `infra/database/` (sqlc + migrations), and `route/` (chi HTTP router for `auth`; gRPC `server.go` + `handler.go` + `interceptor/` for `audit` / `queue`). Cache access (Redis) is provided by `shared/utilcache` and consumed directly from `cmd/<binary>/main.go` — no per-service `infra/cache/` directory. Every binary calls `utilotel.Init(ctx, "<service-name>")` early in `run()` and flushes the returned shutdown ahead of resource close (cache then DB) so in-flight spans + metrics reach the Collector while the network is still up.
 
 Service-to-service calls go over an internal Docker bridge network (`compose.yml`). When working on `audit`, `make audit` also brings up `queue-api` because the audit worker is expected to consume from it.
+
+`auth/src/` is the **canonical reference** for the layered shape — it is the only module with real `domain/` + `service/` content today. `audit/src/` lacks `domain/` + `service/`, and `queue/src/` lacks `domain/` + `service/` + `infra/`; both are scaffolding beyond their `cmd/` + `route/` layers. Treat `auth/`'s patterns as the target shape when filling them in.
+
+## Where to start by intent
+
+| Doing | Read first |
+|---|---|
+| First non-trivial change in a module | `modules/<svc>/CLAUDE.md` + `modules/<svc>/docs/system-design.md` |
+| Adding / altering schema | `migration-author` skill, then `coding-standards.md` §10 |
+| Adding an HTTP endpoint | `endpoint-builder` skill, then `auth/route/login.go` as the template |
+| Adding a sqlc query (no schema change) | `sqlc-query-author` skill, then `regen-sqlc` skill |
+| Touching Istio / Gateway | `deploy/k8s/istio.md` first |
+| Touching obs (Collector / Prom / Tempo / Loki / Grafana) | `otel/README.md` first |
+| Reviewing a branch end-to-end | `multi-perspective-review` skill |
+| Running a single test | "Running a single test" below |
 
 ## Toolchain
 
@@ -28,7 +43,9 @@ The following tools are required and are pre-installed in the devcontainer (`.de
 
 ## Common Commands
 
-All commands run from the repo root unless noted. The `MODS` variable in the `Makefile` is `auth audit queue shared` — module-wide targets iterate that list.
+All commands run from the repo root unless noted. The `MODS` variable in the `Makefile` is `auth audit queue shared` — module-wide targets iterate that list. The `SERVICES` variable is `auth audit` — only those have per-service Compose lifecycle targets (`*-up` / `*-build` / `*-migrate` etc.); queue is brought up as a Compose dependency of `make audit`.
+
+`make help` prints the full target catalog from the `## ...` doc comments — the sections below focus on commands whose **intent or gotcha** is non-obvious; reach for `make help` for full coverage.
 
 ### Workspace-wide
 - `make test` — runs `go test -v -coverprofile=...` per module and prints the `total:` coverage line; profiles + HTML reports land under `.coverage/<mod>-coverage.{txt,html}` at the repo root (single hidden directory, gitignored). `make clean-coverage` removes them.
@@ -45,6 +62,7 @@ cd modules/<service>/src && go test -run TestName ./path/to/pkg
 ### Per-service stack (Docker Compose)
 - `make audit` ≡ `audit-build` + `audit-up` + `audit-migrate`. Brings up `audit-api`, `audit-worker`, `audit-db`, `queue-api`, `migrator`. `make audit-down` stops them.
 - `make auth` ≡ `auth-build` + `auth-up` + `auth-migrate`. Brings up `auth-api`, `auth-db`, `migrator` (note: the auth API depends on the `auth_cache` Redis service in `compose.yml`, but `auth-up` does not start it — start it explicitly with `docker-compose up -d auth_cache` if running auth-api locally; v1 hyphenated `docker-compose` is what the Makefile uses everywhere).
+- **No `make queue-*` lifecycle targets** — queue is not in `SERVICES`. `queue-api` only exists as a Compose service brought up by `make audit`'s dependency graph; stop it via `make audit-down` or `make down`.
 - Postgres host ports: audit `5434` (avoids the very common host-:5432 collision), auth `5433`. Container internal port stays 5432 so service-to-service DNS is unaffected. Redis: `6379`. API containers expose `8080` internally.
 
 ### gRPC code generation
@@ -74,20 +92,22 @@ cd modules/<service>/src && go test -run TestName ./path/to/pkg
 - Granular: `make k8s-cluster` / `k8s-build` / `k8s-load` / `k8s-apply`.
 
 ### Istio Ambient (local kind)
-- `make istio-up` — `istioctl install --set profile=ambient -y` and wait for istiod / ztunnel / istio-cni rollouts. Called automatically by `make k8s-up`.
-- `make istio-down` — `istioctl uninstall --purge -y` and delete `istio-system`.
-- `make istio-status` — pods/services in `istio-system`.
-- `make istio-port-forward` — canonical dev host-access path: `localhost:8081 → svc/auth-gateway-istio:80` via `kubectl port-forward`. NodePort + kind `extraPortMappings` was tried and abandoned (kindnet ↔ Istio CNI iptables interaction silently drops external NodePort traffic — see `deploy/k8s/istio.md` §3).
+- `make istio-up` — first applies the Gateway API standard CRDs (`GATEWAY_API_VERSION` pinned in `Makefile`, today `v1.2.0`), then `istioctl install --set profile=ambient -y`, and waits for istiod / ztunnel / istio-cni-node rollouts. Called automatically by `make k8s-up`. Gateway API CRDs MUST be installed before istiod boots, otherwise istiod's Gateway controller silently skips reconciliation.
+- `make istio-down` — `istioctl uninstall --purge -y`, delete the Gateway API CRDs (same URL as install), and delete `istio-system`.
+- `make istio-status` — pods/services in `istio-system`, the registered `gatewayclass`, and the auth namespace's `gateway` / `httproute`.
+- `make istio-port-forward` — canonical dev host-access path: `localhost:8081 → svc/auth-gateway-istio:80` via `kubectl port-forward --address 0.0.0.0` (the `0.0.0.0` bind makes the listener reachable through docker-proxy when the dev container publishes 8081 to the host). NodePort + kind `extraPortMappings` was tried and abandoned (kindnet ↔ Istio CNI iptables interaction silently drops external NodePort traffic — see `deploy/k8s/istio.md` §3).
 
 ## Conventions Worth Knowing
 
-- **Errors across HTTP**: services return typed errors from `shared/utilhttp` (e.g. `NewDBError`, `NewUnauthorizedError`). The route layer calls `utilhttp.ResponseError(w, err)` which type-switches on `AppError.Type` to the right HTTP status. Add new error categories by extending `ErrorType` and the switch in both `error.go` and `response.go`.
-- **Request decoding**: `utilhttp.RequestBody[T]` and `RequestUrlParam[T]` require `T` to implement `Validate() error` (the `Validator` interface). New request types under `route/request/` must satisfy this.
-- **Logging**: call `utillog.NewLogger()` once in `init()` to install a JSON `slog` handler at debug level, then use `slog` directly. Inside handlers and interceptors that have a request `context.Context` (HTTP / gRPC), prefer `slog.InfoContext(ctx, ...)` over `slog.Info(...)` — the call is one keystroke longer but lets a future log-export bridge auto-attach `trace_id` / `span_id` from the active span.
-- **gRPC consumer pattern**: each consumer module that needs to call another service over gRPC owns a `<consumer>/src/infra/<svc>client/` wrapper (canonical example: `audit/src/infra/queueclient/`). The wrapper is the **only** place inside that consumer that may import `<producer>/route/grpc` cross-service — every other package in the consumer references producer types via the wrapper's type aliases. The wrapper also re-exports `utilgrpc.Option` so callers don't reach for `shared/utilgrpc` or `google.golang.org/grpc`. When proto adds a new message that the consumer must name, add a matching `type X = <svc>grpc.X` alias in the wrapper. See `coding-standards.md` §2 for the contract-surface exemption that makes the cross-service import legal.
-- **gRPC error handling**: handlers return `status.Error(codes.X, msg)` from `google.golang.org/grpc/status` — `utilhttp.AppError` is HTTP-only and does not apply. The recovery interceptor (`route/interceptor/recovery.go`) converts panics to `codes.Internal` so the outer logging interceptor sees a meaningful code on the access log line.
-- **Transport security**: app-level TLS is intentionally **not** exposed by `utilgrpc`. `Dial` uses `insecure.NewCredentials()`; mTLS between pods is the mesh's job (Istio Ambient ztunnel HBONE — see Service mesh section below). Don't reintroduce a `WithTLS`-style option without team agreement.
-- **Generated code**: `infra/database/db/*.go` (sqlc output) and gRPC stubs under `modules/{audit,queue}/src/route/grpc/` (`*.pb.go`, `*_grpc.pb.go`) are generated — modify the source (`.sql` queries, `.proto`) and regenerate. The `shared/<svc>client/` wrappers are hand-written but follow a strict pattern: connection lifecycle + type aliases re-exporting proto types.
+Full rules are in `.claude/rules/coding-standards.md` (loaded below). Repo-specific points worth flagging up front — items that bite if you guess from generic Go knowledge:
+
+- **Errors do NOT use `%w`** — the codebase uses `fmt.Errorf("...: %v", err)` and `utilhttp.ResponseError` discriminates by **concrete typed wrapper via type switch**, not via `errors.Is` / `errors.As`. Don't introduce wrapping unilaterally. Adding a new error category requires synchronized edits in `error.go` and `response.go` (the `add-error-type` skill does both). See `coding-standards.md` §3.
+- **gRPC consumer wrapper is the only legal cross-service import seam.** Each consumer that calls another service owns `<consumer>/src/infra/<svc>client/` (canonical: `audit/src/infra/queueclient/`). That wrapper is the only file in the consumer allowed to import `<producer>/route/grpc`; everywhere else references producer types via `type X = <svc>grpc.X` aliases. The wrapper also re-exports `utilgrpc.Option` so callers never import `shared/utilgrpc` or `google.golang.org/grpc` directly. See `coding-standards.md` §2 (the contract-surface exemption).
+- **gRPC error handling ≠ HTTP error handling.** gRPC handlers return `status.Error(codes.X, msg)` from `google.golang.org/grpc/status` — `utilhttp.AppError` is HTTP-only. The recovery interceptor (`route/interceptor/recovery.go`) converts panics to `codes.Internal` so the outer logging interceptor logs a meaningful code.
+- **Transport security is the mesh's job.** `utilgrpc.Dial` uses `insecure.NewCredentials()` and intentionally exposes no `WithTLS`-style option; mTLS between pods comes from Istio Ambient ztunnel HBONE (see "Service mesh" below). Don't reintroduce an app-level TLS option without team agreement.
+- **`slog.InfoContext(ctx, ...)` over `slog.Info(...)`** in any code path that has a request context. The keystroke cost is small; the payoff is that a future log-export bridge auto-attaches `trace_id` / `span_id` from the active span. The Phase 3 logs bridge is paused (see Observability) but the call sites should already be ctx-aware.
+- **`Validator` is required for every request type.** `utilhttp.RequestBody[T]` and `RequestUrlParam[T]` won't compile without `T.Validate() error`. New `route/request/` types must implement it.
+- **Generated code is regenerated, never hand-edited:** `infra/database/db/*.go` (sqlc), `modules/{audit,queue}/src/route/grpc/*.pb.go` + `*_grpc.pb.go` (protoc). Edit `.sql` / `.proto` and run `make <svc>-sqlc-gen` / `make <svc>-proto-gen`.
 
 ## Kubernetes deployment
 
@@ -115,7 +135,7 @@ Status of the four planned observability phases:
 
 - **Phase 1 (traces + metrics):** done. Spans + RPC duration histograms reach Tempo and Prometheus; verified via `kubectl kustomize` and Compose smoke tests.
 - **Phase 2 (rules + dashboards):** done. Recording / alert rules under `otel/prometheus/rules/`; three split dashboards (`go-runtime`, `http-red`, `grpc-red`).
-- **Phase 3 (logs producer):** **paused.** The `otelslog` bridge crashed `audit-api` with a SIGSEGV inside `go.opentelemetry.io/otel/sdk/log` v0.19's `sync.Pool` path under Go 1.26.2. The bridge is reverted; logs flow only to stdout via `utillog`. Loki container, Collector logs pipeline, and Grafana datasource remain provisioned and idle so re-enabling is one Init function edit away when sdk/log ships a fix (or we pivot to a `filelog` receiver). The `slog.InfoContext` switch in interceptors stays — ctx-aware logging is good practice on its own and is exactly what a future bridge will use.
+- **Phase 3 (logs producer):** **paused** (status as of 2026-05; re-verify upstream before reactivating). The `otelslog` bridge crashed `audit-api` with a SIGSEGV inside `go.opentelemetry.io/otel/sdk/log` v0.19's `sync.Pool` path under Go 1.26.2. The bridge is reverted; logs flow only to stdout via `utillog`. Loki container, Collector logs pipeline, and Grafana datasource remain provisioned and idle so re-enabling is one Init function edit away when sdk/log ships a fix (or we pivot to a `filelog` receiver). The `slog.InfoContext` switch in interceptors stays — ctx-aware logging is good practice on its own and is exactly what a future bridge will use.
 - **Phase 4 (k8s overlay):** done. Five Deployments + Services in `observability` namespace; service-side `OTEL_*` env in each module's k8s ConfigMap points at `otel-collector.observability.svc.cluster.local:4317`.
 
 See `otel/README.md` for the architecture diagram, port table, troubleshooting, and how to add a custom metric / span.
