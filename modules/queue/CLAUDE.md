@@ -12,8 +12,8 @@ Primary spec: [`docs/system-design.md`](docs/system-design.md). §1.2 (what we t
 
 1. `docs/system-design.md` §1–§3 — scope, RFCs/best-practices, audit-side contract.
 2. `src/route/grpc/queue.proto` — the wire contract; every Phase change starts here.
-3. `src/cmd/api/main.go` — gRPC server lifecycle (env → DI → graceful shutdown). Mirror this when wiring is added.
-4. `src/route/server.go` — interceptor chain + reflection + `grpc.health.v1` registration.
+3. `src/cmd/api/main.go` — gRPC server lifecycle (env → DI → graceful shutdown). Calls `utilotel.Init` and flushes the returned shutdown after `GracefulStop`.
+4. `src/route/server.go` — interceptor chain + reflection + `grpc.health.v1` registration. Passes `utilotel.GRPCServerOption()` to `grpc.NewServer(...)` ahead of `ChainUnaryInterceptor`.
 5. `src/route/handler.go` — `*handler` with `UnimplementedQueueServer` embed; this is where real RPCs land.
 6. `src/route/interceptor/{logging,recovery}.go` — the only hand-written interceptors.
 

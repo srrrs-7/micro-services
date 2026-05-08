@@ -12,7 +12,7 @@ Primary spec: [`docs/system-design.md`](docs/system-design.md). Read §1 (scope)
 
 1. `docs/system-design.md` — what the service must guarantee.
 2. `src/route/grpc/audit.proto` — the wire-level contract.
-3. `src/cmd/api/main.go` — env → DI → gRPC server lifecycle (canonical for any new wiring).
+3. `src/cmd/api/main.go` — env → DI → gRPC server lifecycle (canonical for any new wiring). Calls `utilotel.Init` and flushes the returned shutdown ahead of resource teardown so in-flight spans / metrics reach the Collector.
 4. `src/infra/database/migrations/20260507075754_audit_events.sql` — the schema.
 5. `src/infra/database/queries/audit.sql` — currently the only sqlc input.
 6. `src/infra/queueclient/client.go` — the **only** place inside this module that imports `queue/route/grpc` cross-service. See coding-standards §2 for the contract-surface exemption.
@@ -31,6 +31,8 @@ Differs from a "standard" service module in three ways:
 - **`event_id` (UUID) is the natural idempotency key**. `InsertEvent` uses `ON CONFLICT (event_id) DO NOTHING RETURNING ...`; duplicate ingests return the **original** `recorded_at`, not the retry's. Mirror this in any new ingest path.
 - **5W1H column shape is locked** for Phase 1.0. Adding a new structured field (Who/What/Where/Why/How) requires both a schema migration and a proto change; freeform context goes in `details JSONB`. See design §5.1 for what may NOT live in `details` (no PII, no secrets).
 - **gRPC error codes**: handlers return `status.Error(codes.X, msg)` from `google.golang.org/grpc/status`. The recovery interceptor (`route/interceptor/recovery.go`) converts panics to `codes.Internal` so the access log line gets a meaningful code. `utilhttp.AppError` is HTTP-only and does not apply here.
+- **OTel server-side**: `route/server.go` passes `utilotel.GRPCServerOption()` to `grpc.NewServer(...)` *before* the `ChainUnaryInterceptor` line so the StatsHandler sits outside the existing logging/recovery interceptors. The handler-side filter for `grpc.health.v1.Health/Check` lives at the Collector, not here.
+- **OTel client-side**: `infra/queueclient/client.go.New(...)` prepends `utilotel.GRPCClientOption()` to the option list so audit→queue trace context (W3C TraceContext) propagates by default.
 - **DB role separation** that revokes `UPDATE`/`DELETE` (design §5.2) is configured **outside** the migration file so the devcontainer Postgres stays writable for tests. Don't bake the revoke into a migration.
 
 ## Make targets specific to this module

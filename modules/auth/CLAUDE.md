@@ -12,10 +12,11 @@ Primary spec: [`docs/system-design.md`](docs/system-design.md). §1 (scope), §2
 
 1. `docs/system-design.md` §1–§3 — scope, primary RFCs, endpoint catalog.
 2. `src/cmd/api/main.go` — the most complete `main.go` in the repo and the canonical reference for env → DI → server → graceful shutdown wiring.
-3. `src/route/handler.go` — chi router shape (always carries `/health` and `r.Use(r.Middlewares()...)` even when no middleware is registered).
-4. `src/route/login.go` — handler shape (`Decode → Service → Encode`); copy this when adding a new endpoint.
-5. `src/service/login.go` + `src/service/login_test.go` — service layer + the `stubQuerier` pattern used to mock `db.Querier` (see `testing.md` §3).
-6. `src/domain/token.go` — domain types (`UserID`, `Scope`, `Role`, `Expired` are domain primitives, not bare strings).
+3. `src/route/handler.go` — chi router shape (always carries `/health` and `r.Use(r.Middlewares()...)` even when no middleware is registered). Adds `utilotel.HTTPMiddleware("auth-api")` + `middleware.RouteTag()` after the seam.
+4. `src/route/middleware/otel.go` — chi-specific `RouteTag()` that retags OTel spans with `chi.RouteContext.RoutePattern()` after the inner handler runs. The companion to `shared/utilotel.HTTPMiddleware`; together they produce span names like `"GET /auth/v1/users/{id}"`.
+5. `src/route/login.go` — handler shape (`Decode → Service → Encode`); copy this when adding a new endpoint.
+6. `src/service/login.go` + `src/service/login_test.go` — service layer + the `stubQuerier` pattern used to mock `db.Querier` (see `testing.md` §3).
+7. `src/domain/token.go` — domain types (`UserID`, `Scope`, `Role`, `Expired` are domain primitives, not bare strings).
 
 ## Layout (auth-specific)
 
