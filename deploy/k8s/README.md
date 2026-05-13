@@ -462,3 +462,178 @@ kubectl -n auth describe pod -l app.kubernetes.io/name=auth,app.kubernetes.io/co
 - `modules/audit/docs/system-design.md` — audit サービスの設計（5W1H 監査基盤）
 - `modules/queue/docs/system-design.md` — queue サービスの設計（priority queue）
 - `Makefile` — `K8S_IMAGES`、`K8S_NAMESPACES`、`k8s-*` / `istio-*` ターゲットの実装
+
+## 17. 現在のインフラ構成図解
+
+本章は §1〜§15 の個別規約・コマンドを束ねたうえで、**「いま kind cluster に何がデプロイされているか」「どことどこが通信しているか」** を一枚で見渡すためのリファレンス。図はすべて `make k8s-up` 直後の定常状態（§12.1 の「期待される定常状態」）を表す。マニフェストの実体は `modules/<svc>/deploy/k8s/`、`otel/k8s/`、`deploy/k8s/dev/` の三箇所に分散しているため、ここをエントリポイントとして辿れるよう設計した。
+
+### 17.1 クラスタ全体俯瞰
+
+5 つの Namespace（`audit` / `auth` / `queue` / `observability` / `istio-system`）と、それぞれに含まれるワークロードを一枚に展開した図。`──▶` = アプリケーション層トラフィック、`══▶` = クロス NS の唯一の許可経路、`◀──` = テレメトリ送信（OTLP）。
+
+```
+                     host (devcontainer)
+                       localhost:8081
+                              │
+                       make istio-port-forward
+                       (kubectl port-forward :8081 → svc :80)
+                              │
+─────────────────────────── kind cluster "dev" ─────────────────────────────────
+                              ▼
+┌── istio-system  (istioctl install 経由・kustomize 管理外) ────────────────────┐
+│   istiod    (Deployment, control plane :15014)                                │
+│   ztunnel   (DaemonSet, L4 HBONE/mTLS data plane)                             │
+│   istio-cni (DaemonSet, traffic redirect)                                     │
+│                                                                               │
+│   ※ ztunnel が下記 ambient 各 ns の pod ↔ pod を透過暗号化（HBONE）          │
+└───────────────────────────────────────────────────────────────────────────────┘
+
+┌── auth ns   [istio.io/dataplane-mode=ambient] ────────────────────────────────┐
+│                                                                               │
+│   auth-gateway-istio   (Envoy · Gateway CR から auto-provisioned · :80)       │
+│           │  HTTPRoute "/"  →  backendRef auth-api:8080                       │
+│           ▼                                                                   │
+│   auth-api       ×2    (Deployment · chi HTTP :8080 · /health)                │
+│        │ Postgres                                                             │
+│        ├──────────▶   auth-db     (StatefulSet · Postgres :5432 · PVC 1Gi)    │
+│        │ Redis                                                                │
+│        └──────────▶   auth-cache  (Deployment · Redis :6379 · emptyDir)       │
+│                                                                               │
+│   auth-migrate (Job) ── Postgres ──▶ auth-db                                  │
+│        (envFrom: secretRef auth-api-secret → $DB_URL)                         │
+└───────────────────────────────────────────────────────────────────────────────┘
+
+┌── audit ns   [ambient] ──────────────────────┐  ┌── queue ns   [ambient] ────┐
+│                                              │  │                            │
+│   audit-api      ×2  (gRPC :8080,            │  │   queue-api       ×2       │
+│                       grpc.health.v1)        │  │   (Deployment ·            │
+│         │ Postgres                           │  │    gRPC :8080,             │
+│         └──▶ audit-db (StatefulSet ·         │  │    grpc.health.v1)         │
+│              Postgres :5432)                 │  │         ▲                  │
+│                                              │  │         ║ ←─ only legal    │
+│   audit-worker   ×1  (Deployment · STUB)     │  │         ║   cross-ns edge  │
+│         ══════ gRPC :8080 ═══════════════════│══╪═════════╝                  │
+│                                              │  │                            │
+│   audit-migrate (Job) ── Postgres ──▶ db     │  │                            │
+└──────────────────────────────────────────────┘  └────────────────────────────┘
+
+┌── observability ns   [ambient] ───────────────────────────────────────────────┐
+│                                                                               │
+│   otel-collector  :4317  ◀────── OTLP gRPC ──────  auth-api / audit-api /     │
+│        │                                           audit-worker / queue-api   │
+│        ├─▶ Prometheus :9090  ◀──┐                                             │
+│        ├─▶ Tempo :3200       ◀──┤── Grafana :3000  (Compose host :3001)       │
+│        └─▶ Loki :3100        ◀──┘    ※ Loki は Phase 3 一時停止のため idle    │
+│                                                                               │
+│   Prometheus ── scrape ──▶ istiod.istio-system:15014  (mesh control plane)    │
+└───────────────────────────────────────────────────────────────────────────────┘
+```
+
+読み解きのポイント:
+
+- **5 NS のうち kustomize 管理は 4 つ**: `audit`/`auth`/`queue`/`observability` は `deploy/k8s/dev/kustomization.yaml` から composition される（§2）。`istio-system` だけは `istioctl install --set profile=ambient` の別経路（`make istio-up`）で立ち上がる。§13・`deploy/k8s/istio.md` 参照。
+- **`auth-gateway-istio` は YAML にない**: `modules/auth/deploy/k8s/base/gateway.yaml` の `Gateway` CR を istiod が解決し、`<gateway-name>-istio` 命名で Deployment + ClusterIP Service を auto-provision する（§13）。
+- **クロス NS 通信は 1 経路だけ**: `audit-worker → queue-api`。他は同一 NS に閉じている。NetworkPolicy は `audit/networkpolicy.yaml` の `allow-worker-egress-to-queue` と `queue/networkpolicy.yaml` の `allow-api-ingress-from-audit` がペア（§11、§3.1）。
+- **`audit-worker` の CrashLoopBackOff は仕様**: stub 実装（`fmt.Println` 直後 exit）。§4 の備考と §12.1 の「期待される定常状態」と合致する。
+
+### 17.2 トラフィックを 3 プレーンに分解した図
+
+§17.1 のグラフを「コントロールプレーン以外の生きた経路」だけ抜き出し、**north-south / east-west / telemetry** の 3 プレーンに整理する。アプリ実装の責務境界（`utilotel` がやる仕事、Istio がやる仕事、`utilhttp` がやる仕事）とそのまま対応する。
+
+#### ① north-south（外部 → cluster）
+
+```
+host :8081
+    │
+    │  make istio-port-forward
+    │  (kubectl port-forward :8081 → svc :80)
+    ▼
+auth-gateway-istio   (Envoy · Gateway CR から auto-provisioned)
+    │
+    │  HTTPRoute "/"    backendRef: auth-api:8080
+    ▼
+auth-api Pod  (chi HTTP · replicas=2 · kube-proxy で分散)
+```
+
+#### ② east-west（pod ↔ pod / 同 cluster）
+
+```
+caller Pod
+    │
+    │  Cluster DNS:   <svc>.<ns>.svc.cluster.local
+    ▼
+ClusterIP Service
+    │
+    │  kube-proxy が iptables/IPVS で 1 of N に分散
+    │  + ztunnel が透過的に HBONE (mTLS) でラップ
+    ▼
+target Pod (1 of N replicas)
+```
+
+#### ③ telemetry（アプリ → 観測スタック）
+
+```
+all app pods                                     observability ns
+(auth-api / audit-api /                          ┌─ otel-collector :4317 ──┐
+ audit-worker / queue-api)                       │  receivers: OTLP/gRPC   │
+       │                                         │  exporters: prom /      │
+       │  OTLP gRPC :4317                        │            tempo / loki │
+       └────────────────────────────────────────▶└──┬────┬────┬────────────┘
+                                                    │    │    │
+                                       ┌────────────┘    │    └──────────┐
+                                       ▼                 ▼               ▼
+                                  Prometheus         Tempo :3200      Loki :3100
+                                  :9090 (metrics)    (traces)         (Phase 3 idle)
+                                       ▲                 ▲               ▲
+                                       └────────────┬────┴───────────────┘
+                                                    │
+                                              Grafana :3000
+                                              (Compose host :3001)
+
+   Prometheus ── scrape :15014 ──▶ istiod.istio-system   (mesh control plane)
+```
+
+各プレーンの責務境界:
+
+| プレーン | 暗号化 | LB / ルーティング | アプリ側で書くもの |
+|---|---|---|---|
+| ① north-south | dev: なし（port-forward は loopback）／prod: 外部 LB + TLS 終端 | Envoy が `HTTPRoute` に従って分散 | `gateway.yaml`、`/health` ハンドラ（§6）、chi ルータ（HTTP は auth のみ） |
+| ② east-west | Istio ztunnel が透過 mTLS（HBONE） | kube-proxy が ClusterIP を iptables/IPVS でラウンドロビン | `utilgrpc.Dial`（plaintext で OK・コーディング規約 §2）、`replicas` / `maxUnavailable:0` / preStop（§5） |
+| ③ telemetry | ztunnel が HBONE | Collector で受けて Prom/Tempo/Loki に fan-out | `utilotel.Init("<svc>")` + Middleware / Option（`OTEL_*` env でエクスポート先決定） |
+
+### 17.3 マニフェストがどこから組み上がるか
+
+`kubectl apply -k deploy/k8s/dev` を実行した瞬間に何が起きるか、ファイル依存の順で:
+
+```
+                         deploy/k8s/dev/kustomization.yaml
+                                       │
+        ┌──────────────────┬───────────┴───────────┬─────────────────┐
+        ▼                  ▼                       ▼                 ▼
+ modules/auth        modules/audit          modules/queue       otel/k8s
+  /deploy/k8s          /deploy/k8s            /deploy/k8s        /overlays/dev
+  /overlays/dev        /overlays/dev          /overlays/dev          │
+        │                  │                       │                 │
+        ▼                  ▼                       ▼                 ▼
+   namespace+         namespace+              namespace+         namespace
+   ambient label      ambient label           ambient label      observability
+   base/* +           base/* +                base/*             + ambient label
+   postgres+redis     postgres                (DB なし)          collector / prom
+   +dev secret        +dev secret                                tempo / loki / grafana
+   images: :dev       images: :dev            images: :dev       (configMapGenerator
+                                                                  で otel/<comp>/* 取り込み)
+
+   ── 加えて peerauthentication.yaml （istio-system ns / mode: PERMISSIVE） ──
+```
+
+`--load-restrictor=LoadRestrictionsNone` が `make k8s-apply` に付いているのは、`otel/k8s/base/kustomization.yaml` の `configMapGenerator` が `../../<component>/*` を相対パスで参照するため（kustomize のデフォルト sandbox は base ディレクトリ外を拒否する）。CLAUDE.md「Kubernetes deployment」節の補足はここに対応する。
+
+### 17.4 図に出てこない補足（hidden caveats）
+
+図にすると冗長になる、運用上のクセ:
+
+- **NetworkPolicy は強制されない（kindnet 制約）**: `auth/queue/audit` の各 `networkpolicy.yaml` は app pod → `observability` ns への egress を明示的に **許可していない**。本物の CNI（Calico 等）に置換すると OTLP 送信がブロックされて Collector が無音になるため、staging/prod overlay 化のタイミングで `allow-egress-to-observability` を追加する必要がある（kindnet は §11 の通り強制しないので dev では潜伏）。
+- **`audit-worker` も Collector に OTLP を送る設定がある**: `audit-worker-config` ConfigMap に `OTEL_EXPORTER_OTLP_ENDPOINT` が入っている。ただし worker 自体が起動直後に exit するため、実トラフィックは（今は）流れない。実装が入った瞬間に有効化される。
+- **`migrator` イメージは 2 つの Job で共用**: `audit-migrate` / `auth-migrate` は同じ `migrator:dev` を引数違いで呼ぶ（§9）。Dockerfile は `.images/migrator/Dockerfile` の 1 本のみ。
+- **PeerAuthentication は `istio-system` ns に置く**: 名前空間ごとに置くこともできるが、現在は mesh-wide で `PERMISSIVE` を効かせている（`deploy/k8s/dev/peerauthentication.yaml`）。STRICT 化のときも置き場所は同じで `mode` だけ差し替える（`istio.md` §4）。
+- **Compose 経路はこの図に無い**: 本章は kind 経路のみを示す。Compose 経路は `compose.yml` を直接参照する（§1 の「Compose と並走可能」と合致）し、テレメトリ stack のみ `otel/compose.yml` で共有する。Istio は Compose 経路には乗らない。
