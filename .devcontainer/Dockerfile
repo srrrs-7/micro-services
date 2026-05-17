@@ -48,6 +48,9 @@ WORKDIR /workspace/main
 # Install claude code
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
+# opencode
+RUN curl -fsSL https://opencode.ai/install | bash
+
 # go migration atlas installation
 RUN curl -sSf https://atlasgo.sh | sh
 
@@ -61,7 +64,11 @@ RUN curl -L "$(curl -s https://api.github.com/repos/sqlc-dev/sqlc/releases/lates
       | cut -d '"' -f 4)" \
     | tar xz -C ~/.local/bin
 
+# 1. Define HOME explicitly
+ENV HOME="/home/vscode"
+# 2. Define GOPATH
 ENV GOPATH="/home/vscode/go"
+# 3. Now both variables can safely be appended to the PATH
 ENV PATH="${GOPATH}/bin:${HOME}/.local/bin:${PATH}"
 
 # protoc + Go plugins
