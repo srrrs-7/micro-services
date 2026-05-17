@@ -1,0 +1,34 @@
+# AuthorizationPolicy for audit-worker.
+#
+# Allows traffic only from:
+# - queue-api (gRPC consume: audit-worker pulls from queue-api)
+# - otel-collector (observability scrape)
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: audit-worker-policy
+  namespace: audit
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: audit
+      app.kubernetes.io/component: worker
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/queue/sa/queue-api"
+      to:
+        - operation:
+            ports: ["8080"]
+            methods: ["POST"]
+            paths:
+              - "/queue.Queue/*"
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/observability/sa/otel-collector"
+      to:
+        - operation:
+            ports: ["8080"]

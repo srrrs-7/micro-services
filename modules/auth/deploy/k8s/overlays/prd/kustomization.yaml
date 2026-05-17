@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: auth
+resources:
+  - ../../base
+  - secret.yaml
+  - authorization-policy.yaml
+  - external-db.yaml
+  - external-cache.yaml
+images:
+  - name: auth-api
+    newTag: prd
+  - name: migrator
+    newTag: prd
+patches:
+  # Replace Gateway listeners (HTTP → HTTPS + TLS redirect)
+  - path: gateway-https-patch.yaml
+  # Bump replicas + use prod secret
+  - target:
+      kind: Deployment
+      name: auth-api
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 3
+      - op: replace
+        path: /spec/template/spec/containers/0/envFrom/1/secretRef/name
+        value: auth-api-secret-prd
+  # Migrate job uses prod secret
+  - target:
+      kind: Job
+      name: auth-migrate
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/envFrom/0/secretRef/name
+        value: auth-api-secret-prd

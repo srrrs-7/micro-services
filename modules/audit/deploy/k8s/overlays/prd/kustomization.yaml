@@ -1,0 +1,44 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: audit
+resources:
+  - ../../base
+  - secret.yaml
+  - authorization-policy-api.yaml
+  - authorization-policy-worker.yaml
+  - external-db.yaml
+images:
+  - name: audit-api
+    newTag: prd
+  - name: audit-worker
+    newTag: prd
+  - name: migrator
+    newTag: prd
+patches:
+  - target:
+      kind: Job
+      name: audit-migrate
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/envFrom/0/secretRef/name
+        value: audit-api-secret-prd
+  - target:
+      kind: Deployment
+      name: audit-api
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 3
+      - op: replace
+        path: /spec/template/spec/containers/0/envFrom/1/secretRef/name
+        value: audit-api-secret-prd
+  - target:
+      kind: Deployment
+      name: audit-worker
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 2
+      - op: replace
+        path: /spec/template/spec/containers/0/envFrom/1/secretRef/name
+        value: audit-api-secret-prd

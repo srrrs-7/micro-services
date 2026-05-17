@@ -1,0 +1,35 @@
+# AuthorizationPolicy for queue-api (gRPC).
+#
+# Allows traffic only from:
+# - audit-worker (the sole consumer of queue-api in production)
+# - otel-collector (observability scrape)
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: queue-api-policy
+  namespace: queue
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: queue
+      app.kubernetes.io/component: api
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/audit/sa/audit-worker"
+      to:
+        - operation:
+            ports: ["8080"]
+            methods: ["POST"]
+            paths:
+              - "/grpc.health.v1.Health/*"
+              - "/queue.Queue/*"
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/observability/sa/otel-collector"
+      to:
+        - operation:
+            ports: ["8080"]

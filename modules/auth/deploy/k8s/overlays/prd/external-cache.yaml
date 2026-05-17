@@ -1,0 +1,20 @@
+# ExternalName Service for the production Redis cache.
+#
+# In production the cache runs outside the cluster (managed ElastiCache / Memorystore).
+# The ExternalName Service lets in-cluster pods reach it via `auth-cache.auth.svc.cluster.local:6379`
+# without changing application config.
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-cache
+  namespace: auth
+  labels:
+    app.kubernetes.io/name: auth
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  type: ExternalName
+  externalName: change-me-external-cache.external.svc.cluster.local
+  ports:
+    - name: redis
+      port: 6379

@@ -1,0 +1,190 @@
+# Production overlay for the observability stack.
+#
+# Key differences from dev:
+# - Persistent storage (PVCs) instead of emptyDir
+# - Higher resource limits
+# - Prometheus retention extended to 7d
+# - Grafana admin credentials via Secret
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - pvc.yaml
+  - grafana-secret.yaml
+
+patches:
+  # Prometheus: 7d retention, 3 replicas
+  - target:
+      kind: Deployment
+      name: prometheus
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/template/spec/containers/0/args
+        value:
+          - --config.file=/etc/prometheus/prometheus.yml
+          - --storage.tsdb.path=/prometheus
+          - --storage.tsdb.retention.time=7d
+          - --storage.tsdb.retention.size=50GB
+          - --web.enable-lifecycle
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: "2"
+            memory: 4Gi
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: data-pvc
+      - op: replace
+        path: /spec/template/spec/containers/0/volumeMounts/2
+        value:
+          name: data-pvc
+          mountPath: /prometheus
+  # Tempo: persistent storage for traces
+  - target:
+      kind: Deployment
+      name: tempo
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: "2"
+            memory: 2Gi
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: data-pvc
+      - op: replace
+        path: /spec/template/spec/containers/0/volumeMounts/2
+        value:
+          name: data-pvc
+          mountPath: /var/tempo
+  # Loki: persistent logs storage
+  - target:
+      kind: Deployment
+      name: loki
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: "2"
+            memory: 2Gi
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: data-pvc
+      - op: replace
+        path: /spec/template/spec/containers/0/volumeMounts/2
+        value:
+          name: data-pvc
+          mountPath: /var/loki
+  # Grafana: admin credentials from Secret
+  - target:
+      kind: Deployment
+      name: grafana
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/env
+        value:
+          - name: GF_AUTH_ANONYMOUS_ENABLED
+            value: "false"
+          - name: GF_SECURITY_ADMIN_USER
+            valueFrom:
+              secretKeyRef:
+                name: grafana-admin-secret
+                key: admin-user
+          - name: GF_SECURITY_ADMIN_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: grafana-admin-secret
+                key: admin-password
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+  # OTel Collector: production resources
+  - target:
+      kind: Deployment
+      name: otel-collector
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 2
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 200m
+            memory: 256Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+
+# PVCs for persistent storage
+patches:
+  - target:
+      kind: Deployment
+      name: prometheus
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: prometheus
+      spec:
+        template:
+          spec:
+            volumes:
+              - name: data-pvc
+                persistentVolumeClaim:
+                  claimName: prometheus-data-pvc
+  - target:
+      kind: Deployment
+      name: tempo
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: tempo
+      spec:
+        template:
+          spec:
+            volumes:
+              - name: data-pvc
+                persistentVolumeClaim:
+                  claimName: tempo-data-pvc
+  - target:
+      kind: Deployment
+      name: loki
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: loki
+      spec:
+        template:
+          spec:
+            volumes:
+              - name: data-pvc
+                persistentVolumeClaim:
+                  claimName: loki-data-pvc

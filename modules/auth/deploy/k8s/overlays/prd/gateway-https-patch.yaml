@@ -1,0 +1,47 @@
+# Production Gateway patch — replaces the dev HTTP listener with HTTPS + TLS redirect.
+# Applied as a strategic-merge patch over base/gateway.yaml.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: auth-gateway
+  namespace: auth
+  annotations:
+    networking.istio.io/service-type: LoadBalancer
+spec:
+  gatewayClassName: istio
+  listeners:
+    - name: https
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        credentialName: auth-tls-cert
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: http
+      port: 80
+      protocol: HTTP
+      tls:
+        redirect: true
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: auth-route
+  namespace: auth
+spec:
+  parentRefs:
+    - name: auth-gateway
+      sectionName: https
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: auth-api
+          port: 8080

@@ -9,18 +9,20 @@
 - **Compose と並走可能**: `compose.yml` は廃止せず、Docker Compose 経由の素早い反復ループ用に残す。k8s は追加の経路。
 - **kind での再現性最優先**: `:dev` タグの local image を `kind load` する前提。`imagePullPolicy: IfNotPresent` を全コンテナで明示し、レジストリ依存を持たない。
 - **Stateless API は LB 可能な構成で配置**: `*-api` Deployment は replicas: 2 + ClusterIP + RollingUpdate(maxUnavailable: 0) + PodDisruptionBudget を備える（後述）。
-- **Stateful 依存は dev overlay に閉じる**: Postgres/Redis は `overlays/dev/` でのみ提供。staging/prod overlay では削除し、Secret 経由でマネージドDBに接続する想定（未実装）。
+- **Stateful 依存は dev overlay に閉じる**: Postgres/Redis は `overlays/dev/` でのみ提供。prd overlay では ExternalName Service でマネージドDBに接続する。
 
 ## 2. ディレクトリレイアウト
 
 ```
 deploy/k8s/
 ├── istio.md                        # env-agnostic な Istio Ambient 解説
-└── dev/                            # `kubectl apply -k deploy/k8s/dev` のエントリポイント
-    ├── kustomization.yaml          # modules/<svc>/overlays/dev + otel/k8s/overlays/dev + peerauthentication.yaml
-    └── peerauthentication.yaml     # Istio 自前 CR (env 固有 — dev は PERMISSIVE)
-
-# 将来 stg/, prd/ も同じ shape (kustomization.yaml + 自前 CR)
+├── architecture.md                 # Mermaid による全体構成図
+├── dev/                            # `kubectl apply -k deploy/k8s/dev` のエントリポイント
+│   ├── kustomization.yaml          # modules/<svc>/overlays/dev + otel/k8s/overlays/dev + peerauthentication.yaml
+│   └── peerauthentication.yaml     # Istio 自前 CR (env 固有 — dev は PERMISSIVE)
+└── prd/                            # `kubectl apply -k deploy/k8s/prd` のエントリポイント
+    ├── kustomization.yaml          # modules/<svc>/overlays/prd + otel/k8s/overlays/prd + peerauthentication.yaml
+    └── peerauthentication.yaml     # Istio 自前 CR (env 固有 — prd は STRICT)
 
 modules/<svc>/deploy/k8s/
 ├── base/                           # 環境非依存の形（Deployment, Service, Job, NetworkPolicy, PDB）
@@ -31,13 +33,19 @@ modules/<svc>/deploy/k8s/
 │   ├── api-pdb.yaml                # PodDisruptionBudget（minAvailable: 1）
 │   ├── (worker-deployment.yaml)    # audit のみ
 │   ├── migrate-job.yaml            # audit / auth のみ（queue は DB を持たない）
-│   └── networkpolicy.yaml
+│   └── networkpolicy.yaml          # default-deny + dns-egress + intra-ns + otlp-egress
 └── overlays/
-    └── dev/                        # in-cluster Postgres / Redis / dev secret + image tag
-        ├── kustomization.yaml      # namespace: <svc>, images: { newTag: dev }
-        ├── postgres.yaml           # StatefulSet + Service（audit / auth のみ）
-        ├── redis.yaml              # Deployment + Service（auth のみ）
-        └── secret.yaml             # DB_URL placeholder（compose と等価のダミー値）
+    ├── dev/                        # in-cluster Postgres / Redis / dev secret + image tag
+    │   ├── kustomization.yaml      # namespace: <svc>, images: { newTag: dev }
+    │   ├── postgres.yaml           # StatefulSet + Service（audit / auth のみ）
+    │   ├── redis.yaml              # Deployment + Service（auth のみ）
+    │   └── secret.yaml             # DB_URL placeholder（compose と等価のダミー値）
+    └── prd/                        # HTTPS Gateway + AuthorizationPolicy + ExternalName + prod secret
+        ├── kustomization.yaml      # namespace: <svc>, images: { newTag: prd }, replicas 増強
+        ├── secret.yaml             # 本番 DB_URL (base64-encoded)
+        ├── gateway-https-patch.yaml# auth のみ: TLS terminate + HTTP→HTTPS redirect
+        ├── authorization-policy*.yaml  # SAベースのアクセス制御
+        └── external-db.yaml        # ExternalName Service (managed RDS)
 ```
 
 `shared/` はライブラリ用モジュールなので `deploy/` を持たない。
@@ -263,13 +271,14 @@ queue は DB を持たないので migrate Job も持たない。
 
 ## 11. ネットワークポリシー
 
-各サービスの `base/networkpolicy.yaml` に最低3本（クロスネームスペース通信があれば追加で1本）。
+各サービスの `base/networkpolicy.yaml` に最低4本（クロスネームスペース通信があれば追加で1本）。
 
 | Policy | 適用範囲 | 役割 |
 |---|---|---|
 | `default-deny` | `podSelector: {}` | 全 Pod の Ingress / Egress をデフォルト拒否 |
 | `allow-dns-egress` | 全 Pod | `kube-system:53/UDP+TCP` を許可（CoreDNS） |
 | `allow-intra-namespace` | 全 Pod | 同一 NS 内の双方向通信を許可 |
+| `allow-otlp-egress` | 全 Pod | `observability` ns の otel-collector `4317/TCP` + `4318/TCP` を許可 |
 | `allow-worker-egress-to-queue` | audit/worker | `queue` ns の queue-api 8080/TCP に egress |
 | `allow-api-ingress-from-audit` | queue/api | `audit` ns からの ingress 8080/TCP |
 
@@ -368,23 +377,132 @@ kubectl -n auth rollout restart deployment/auth-api # 該当を再起動
 
 ## 13. サービスを追加するときの手順
 
-1. `modules/<svc>/deploy/k8s/{base,overlays/dev}/` を既存サービスと同じ形で作る。**auth が最も完全**（cache・db・PDB・probe フル装備）、**queue が最も軽量**（DB なし・PDB のみ）なので雛形として参照。
+1. `modules/<svc>/deploy/k8s/{base,overlays/dev,overlays/prd}/` を既存サービスと同じ形で作る。**auth が最も完全**（cache・db・PDB・probe フル装備）、**queue が最も軽量**（DB なし・PDB のみ）なので雛形として参照。
 2. `Namespace` リソースを追加。`name` はモジュール名と同じにする。
-3. `deploy/k8s/dev/kustomization.yaml` の `resources:` に新しい overlay パスを追加。
-4. 新規イメージを `Makefile` の `K8S_IMAGES` に追加（`make k8s-build` / `make k8s-load` が拾うようにする）。
-5. クロスネームスペース通信が発生する場合: **送信側** の base に egress を、**受信側** の base に ingress を、それぞれ書く。`audit/networkpolicy.yaml` の `allow-worker-egress-to-queue` と `queue/networkpolicy.yaml` の `allow-api-ingress-from-audit` がペアの実例。
-6. API ワークロードであれば `api-deployment.yaml` + `api-service.yaml` + `api-pdb.yaml` をセットで揃え、kustomization に登録する。
+3. `deploy/k8s/dev/kustomization.yaml` の `resources:` に新しい dev overlay パスを追加。
+4. `deploy/k8s/prd/kustomization.yaml` の `resources:` に新しい prd overlay パスを追加。
+5. 新規イメージを `Makefile` の `K8S_IMAGES` に追加（`make k8s-build` / `make k8s-load` が拾うようにする）。
+6. クロスネームスペース通信が発生する場合: **送信側** の base に egress を、**受信側** の base に ingress を、それぞれ書く。`audit/networkpolicy.yaml` の `allow-worker-egress-to-queue` と `queue/networkpolicy.yaml` の `allow-api-ingress-from-audit` がペアの実例。
+7. API ワークロードであれば `api-deployment.yaml` + `api-service.yaml` + `api-pdb.yaml` をセットで揃え、kustomization に登録する。
+8. prd overlay に `authorization-policy.yaml` を追加し、Istio AuthorizationPolicy で SA ベースのアクセス制御を設定する。
 
-## 14. 既知の制約と将来の方向性
+## 14. Production overlay (`deploy/k8s/prd`)
 
-| 状態 | 内容 |
-|---|---|
-| ✅ ある | dev overlay（kind）、base 側の HA 設定（replicas:2, RollingUpdate, Anti-Affinity, PDB, preStop）、Istio Ambient（mTLS + Gateway API 入口） |
-| ❌ まだない | staging / prod overlay。ExternalSecrets、HPA、ServiceMonitor、ClusterIssuer 等の本番配線。audit/queue 用の Gateway（外部公開予定なら追加） |
-| ⚠️ stub | audit-worker のバイナリのみ。Pod は CrashLoopBackOff で正常（`audit-api` / `queue-api` は gRPC サーバとして常駐する） |
-| ⚠️ kindnet 制限 | NetworkPolicy が dev 環境では強制されない。Calico を入れれば強制される |
-| ⚠️ 単一 PV | dev の PVC は kind の local-path-provisioner（ノード固有）。マルチノード kind では Pod が別ノードに schedule された瞬間にデータを失う |
-| ⚠️ mTLS posture | dev は PERMISSIVE。STRICT への切替は `deploy/k8s/istio.md` §4 を参照 |
+dev overlay との差分を下表にまとめる。全変更は overlay パッチで実現しており、base マニフェストは環境非依存のまま。
+
+### 14.1 差分サマリ
+
+| 項目 | dev | prd |
+|---|---|---|
+| **mTLS** | `PeerAuthentication` mode: `PERMISSIVE` | **mode: `STRICT`** — plaintext 拒否 |
+| **Gateway** | HTTP :80（port-forward 経由） | **HTTPS :443** + TLS terminate + HTTP→HTTPS redirect |
+| **AuthorizationPolicy** | なし | **全サービスに SA ベースの allow ルール** |
+| **DB/Cache** | in-cluster StatefulSet / Deployment | **ExternalName Service**（managed RDS / ElastiCache） |
+| **replicas** | api: 2, worker: 1 | **api: 3, worker: 2** |
+| **image tag** | `:dev` | `:prd` |
+| **OTLP egress** | base に追加済み（dev/prd 共通） | 同上 |
+| **obs storage** | emptyDir | **PVC**（Prometheus 50Gi / Tempo 20Gi / Loki 20Gi） |
+| **Prometheus retention** | 24h | **7d / 50GB** |
+| **Grafana auth** | anonymous Admin | **Secret-based credentials** |
+| **OTel Collector** | 1 replica | **2 replicas** |
+
+### 14.2 AuthorizationPolicy 一覧
+
+prd では各ワークロードに `AuthorizationPolicy` を配置し、Istio mTLS の SPIFFE ID（`cluster.local/ns/<ns>/sa/<sa>`）でアクセス元を制限する。
+
+| Policy | namespace | 対象 | 許可される送信元 |
+|---|---|---|---|
+| `auth-api-policy` | auth | auth-api | `auth-gateway-istio`（Gateway Envoy のみ） |
+| `audit-api-policy` | audit | audit-api | `audit-worker`（同 NS 内） |
+| `audit-worker-policy` | audit | audit-worker | `queue-api`（gRPC consume）+ `otel-collector` |
+| `queue-api-policy` | queue | queue-api | `audit-worker` + `otel-collector` |
+
+> **注意**: Gateway Envoy の Service Account 名 `auth-gateway-istio` は Istio が自動プロビジョニングする。本番でカスタム gateway を使う場合は `spec.selector.matchLabels` と `source.principals` を合わせること。
+
+### 14.3 HTTPS Gateway 設定
+
+`modules/auth/deploy/k8s/overlays/prd/gateway-https-patch.yaml` が base の Gateway を上書きする:
+
+```yaml
+listeners:
+  - name: https
+    port: 443
+    protocol: HTTPS
+    tls:
+      mode: Terminate
+      credentialName: auth-tls-cert   # ← kubectl create secret tls auth-tls-cert が必要
+  - name: http
+    port: 80
+    protocol: HTTP
+    tls:
+      redirect: true                  # ← HTTP アクセスは HTTPS にリダイレクト
+```
+
+本番デプロイ前に TLS 証明書を Secret として登録する必要がある:
+
+```bash
+kubectl -n auth create secret tls auth-tls-cert \
+  --cert=path/to/tls.crt \
+  --key=path/to/tls.key
+```
+
+cert-manager を導入している場合は `Certificate` CR で自動発行可能。
+
+### 14.4 ExternalName Service（DB / Cache）
+
+prd overlay では StatefulSet ベースの DB/Cache を ExternalName Service に置き換え、マネージドサービス（RDS / ElastiCache / Cloud SQL / Memorystore）を参照する:
+
+```yaml
+# auth/overlays/prd/external-db.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-db
+  namespace: auth
+spec:
+  type: ExternalName
+  externalName: change-me-external-db.external.svc.cluster.local
+  ports:
+    - name: postgres
+      port: 5432
+```
+
+`externalName` は実際のマネージドDBのエンドポイントに書き換える。アプリケーション側の `DB_URL` は `Service` 名（`auth-db.auth.svc.cluster.local`）を参照するので、コード変更は不要。
+
+### 14.5 デプロイ手順
+
+```bash
+# 1. TLS 証明書を Secret として登録（auth namespace）
+kubectl -n auth create secret tls auth-tls-cert --cert=tls.crt --key=tls.key
+
+# 2. 本番 Secret を更新（各 overlay の secret.yaml を編集、または external-secrets で管理）
+#    - modules/auth/deploy/k8s/overlays/prd/secret.yaml
+#    - modules/audit/deploy/k8s/overlays/prd/secret.yaml
+#    - otel/k8s/overlays/prd/grafana-secret.yaml
+
+# 3. ExternalName の externalName を実際のエンドポイントに更新
+#    - modules/auth/deploy/k8s/overlays/prd/external-db.yaml
+#    - modules/auth/deploy/k8s/overlays/prd/external-cache.yaml
+#    - modules/audit/deploy/k8s/overlays/prd/external-db.yaml
+
+# 4. デプロイ
+kubectl kustomize --load-restrictor=LoadRestrictionsNone deploy/k8s/prd | kubectl apply -f -
+
+# 5. 確認
+kubectl get pods -A
+kubectl -n istio-system get peerauthentication default -o jsonpath='{.spec.mtls.mode}'
+# → STRICT
+```
+
+### 14.6 観測スタック（prd）
+
+| コンポーネント | dev | prd |
+|---|---|---|
+| otel-collector | 1 replica, 500m CPU / 512Mi mem | **2 replicas**, 1 CPU / 1Gi mem |
+| prometheus | emptyDir, 24h retention | **PVC 50Gi**, 7d / 50GB retention |
+| tempo | emptyDir | **PVC 20Gi** |
+| loki | emptyDir | **PVC 20Gi** |
+| grafana | anonymous Admin | **Secret-based auth** |
 
 ## 15. トラブルシューティング
 
@@ -458,6 +576,7 @@ kubectl -n auth describe pod -l app.kubernetes.io/name=auth,app.kubernetes.io/co
 
 - `.claude/rules/kubernetes-conventions.md` — 命名・ラベル・Service 種別・migration・Service Mesh ルール（§13）
 - `deploy/k8s/istio.md` — Istio Ambient の構成・ホスト到達・STRICT mTLS 移行手順
+- `deploy/k8s/architecture.md` — Mermaid による全体構成図
 - `modules/auth/docs/system-design.md` — auth サービスの設計（OAuth/OIDC, MVP）
 - `modules/audit/docs/system-design.md` — audit サービスの設計（5W1H 監査基盤）
 - `modules/queue/docs/system-design.md` — queue サービスの設計（priority queue）
@@ -606,24 +725,47 @@ all app pods                                     observability ns
 `kubectl apply -k deploy/k8s/dev` を実行した瞬間に何が起きるか、ファイル依存の順で:
 
 ```
-                         deploy/k8s/dev/kustomization.yaml
-                                       │
-        ┌──────────────────┬───────────┴───────────┬─────────────────┐
-        ▼                  ▼                       ▼                 ▼
- modules/auth        modules/audit          modules/queue       otel/k8s
-  /deploy/k8s          /deploy/k8s            /deploy/k8s        /overlays/dev
-  /overlays/dev        /overlays/dev          /overlays/dev          │
-        │                  │                       │                 │
-        ▼                  ▼                       ▼                 ▼
-   namespace+         namespace+              namespace+         namespace
-   ambient label      ambient label           ambient label      observability
-   base/* +           base/* +                base/*             + ambient label
-   postgres+redis     postgres                (DB なし)          collector / prom
-   +dev secret        +dev secret                                tempo / loki / grafana
-   images: :dev       images: :dev            images: :dev       (configMapGenerator
-                                                                  で otel/<comp>/* 取り込み)
+                          deploy/k8s/dev/kustomization.yaml
+                                        │
+         ┌──────────────────┬───────────┴───────────┬─────────────────┐
+         ▼                  ▼                       ▼                 ▼
+  modules/auth        modules/audit          modules/queue       otel/k8s
+   /deploy/k8s          /deploy/k8s            /deploy/k8s        /overlays/dev
+   /overlays/dev        /overlays/dev          /overlays/dev          │
+         │                  │                       │                 │
+         ▼                  ▼                       ▼                 ▼
+    namespace+         namespace+              namespace+         namespace
+    ambient label      ambient label           ambient label      observability
+    base/* +           base/* +                base/*             + ambient label
+    postgres+redis     postgres                (DB なし)          collector / prom
+    +dev secret        +dev secret                                tempo / loki / grafana
+    images: :dev       images: :dev            images: :dev       (configMapGenerator
+                                                                   で otel/<comp>/* 取り込み)
 
-   ── 加えて peerauthentication.yaml （istio-system ns / mode: PERMISSIVE） ──
+    ── 加えて peerauthentication.yaml （istio-system ns / mode: PERMISSIVE） ──
+```
+
+prd overlay も同じ構造:
+
+```
+                          deploy/k8s/prd/kustomization.yaml
+                                        │
+         ┌──────────────────┬───────────┴───────────┬─────────────────┐
+         ▼                  ▼                       ▼                 ▼
+  modules/auth        modules/audit          modules/queue       otel/k8s
+   /deploy/k8s          /deploy/k8s            /deploy/k8s        /overlays/prd
+   /overlays/prd        /overlays/prd          /overlays/prd          │
+         │                  │                       │                 │
+         ▼                  ▼                       ▼                 ▼
+    base/* +           base/* +                base/*             namespace
+    HTTPS Gateway      AuthorizationPolicy     AuthorizationPolicy observability
+    AuthorizationPolicy ExternalName DB        (replicas: 3)       + PVCs (50/20/20Gi)
+    ExternalName DB    (replicas: api=3,                           + grafana-secret
+    ExternalName Cache  worker=2)
+    (replicas: 3)      images: :prd
+    images: :prd
+
+    ── 加えて peerauthentication.yaml （istio-system ns / mode: STRICT） ──
 ```
 
 `--load-restrictor=LoadRestrictionsNone` が `make k8s-apply` に付いているのは、`otel/k8s/base/kustomization.yaml` の `configMapGenerator` が `../../<component>/*` を相対パスで参照するため（kustomize のデフォルト sandbox は base ディレクトリ外を拒否する）。CLAUDE.md「Kubernetes deployment」節の補足はここに対応する。
@@ -632,8 +774,9 @@ all app pods                                     observability ns
 
 図にすると冗長になる、運用上のクセ:
 
-- **NetworkPolicy は強制されない（kindnet 制約）**: `auth/queue/audit` の各 `networkpolicy.yaml` は app pod → `observability` ns への egress を明示的に **許可していない**。本物の CNI（Calico 等）に置換すると OTLP 送信がブロックされて Collector が無音になるため、staging/prod overlay 化のタイミングで `allow-egress-to-observability` を追加する必要がある（kindnet は §11 の通り強制しないので dev では潜伏）。
+- **OTLP egress NetworkPolicy は base に追加済み**: `allow-otlp-egress` が全サービスの `base/networkpolicy.yaml` に含まれる。CNI が Policy を強制する環境（Calico 等）でも OTLP トラフィックはブロックされない。
 - **`audit-worker` も Collector に OTLP を送る設定がある**: `audit-worker-config` ConfigMap に `OTEL_EXPORTER_OTLP_ENDPOINT` が入っている。ただし worker 自体が起動直後に exit するため、実トラフィックは（今は）流れない。実装が入った瞬間に有効化される。
 - **`migrator` イメージは 2 つの Job で共用**: `audit-migrate` / `auth-migrate` は同じ `migrator:dev` を引数違いで呼ぶ（§9）。Dockerfile は `.images/migrator/Dockerfile` の 1 本のみ。
-- **PeerAuthentication は `istio-system` ns に置く**: 名前空間ごとに置くこともできるが、現在は mesh-wide で `PERMISSIVE` を効かせている（`deploy/k8s/dev/peerauthentication.yaml`）。STRICT 化のときも置き場所は同じで `mode` だけ差し替える（`istio.md` §4）。
+- **PeerAuthentication は `istio-system` ns に置く**: 名前空間ごとに置くこともできるが、現在は mesh-wide で `PERMISSIVE`（dev）/ `STRICT`（prd）を効らせている（それぞれ `deploy/k8s/dev/peerauthentication.yaml` / `deploy/k8s/prd/peerauthentication.yaml`）。
 - **Compose 経路はこの図に無い**: 本章は kind 経路のみを示す。Compose 経路は `compose.yml` を直接参照する（§1 の「Compose と並走可能」と合致）し、テレメトリ stack のみ `otel/compose.yml` で共有する。Istio は Compose 経路には乗らない。
+- **prd overlay の AuthorizationPolicy は SA 名に依存**: `auth-gateway-istio` は Istio が auto-provision する Envoy gateway の Service Account。本番でカスタム gateway を使う場合は `source.principals` を実際の SA に合わせること。

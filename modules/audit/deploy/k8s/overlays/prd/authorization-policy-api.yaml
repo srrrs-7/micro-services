@@ -1,0 +1,29 @@
+# AuthorizationPolicy for audit-api (gRPC).
+#
+# Allows traffic only from:
+# - auth-gateway-istio (for health checks via Gateway if needed)
+# - audit-worker (same namespace, intra-service)
+# - Istio system probes
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: audit-api-policy
+  namespace: audit
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: audit
+      app.kubernetes.io/component: api
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/audit/sa/audit-worker"
+      to:
+        - operation:
+            ports: ["8080"]
+            methods: ["POST"]
+            paths:
+              - "/grpc.health.v1.Health/*"
+              - "/audit.Audit/*"

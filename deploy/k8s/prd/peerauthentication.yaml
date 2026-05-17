@@ -1,0 +1,15 @@
+# Production mTLS posture: STRICT.
+#
+# All pods in ambient-enrolled namespaces (audit / auth / queue / observability)
+# MUST communicate over HBONE (mTLS). Plaintinct traffic is rejected at ztunnel.
+#
+# Dev uses PERMISSIVE for staged rollout; this file is the prod binding.
+# See deploy/k8s/istio.md §4 for the STRICT migration checklist.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: istio-system
+spec:
+  mtls:
+    mode: STRICT

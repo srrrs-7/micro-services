@@ -1,0 +1,20 @@
+# ExternalName Service for the production Postgres database.
+#
+# In production the DB runs outside the cluster (managed RDS / Cloud SQL).
+# The ExternalName Service lets in-cluster pods reach it via `audit-db.audit.svc.cluster.local:5432`
+# without changing application config.
+apiVersion: v1
+kind: Service
+metadata:
+  name: audit-db
+  namespace: audit
+  labels:
+    app.kubernetes.io/name: audit
+    app.kubernetes.io/component: db
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  type: ExternalName
+  externalName: change-me-external-db.external.svc.cluster.local
+  ports:
+    - name: postgres
+      port: 5432

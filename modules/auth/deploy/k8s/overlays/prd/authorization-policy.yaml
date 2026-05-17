@@ -1,0 +1,24 @@
+# AuthorizationPolicy for auth namespace.
+#
+# Restricts ingress to auth-api so that only traffic from the Istio
+# auto-provisioned gateway pod is accepted. This prevents direct pod
+# access from bypassing the Gateway / TLS termination.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: auth-api-policy
+  namespace: auth
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: auth
+      app.kubernetes.io/component: api
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/auth/sa/auth-gateway-istio"
+      to:
+        - operation:
+            ports: ["8080"]
