@@ -59,10 +59,13 @@ RUN curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b ~/.local/bin
 
 # go orm sqlc installation
 RUN curl -L "$(curl -s https://api.github.com/repos/sqlc-dev/sqlc/releases/latest \
-      | grep "browser_download_url.*$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m \
-      | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" \
-      | cut -d '"' -f 4)" \
-    | tar xz -C ~/.local/bin
+       | grep "browser_download_url.*$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m \
+       | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" \
+       | cut -d '"' -f 4)" \
+     | tar xz -C ~/.local/bin
+
+# antigravity google cli
+RUN curl -fsSL https://antigravity.google/cli/install.sh | bash
 
 # 1. Define HOME explicitly
 ENV HOME="/home/vscode"
