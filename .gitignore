@@ -6,3 +6,6 @@ setup.personal.sh
 /.coverage/
 
 compose.override.yml
+
+# Antigravity CLI
+.antigravitycli/
