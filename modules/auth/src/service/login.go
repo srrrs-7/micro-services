@@ -6,14 +6,16 @@ import (
 	"context"
 	"fmt"
 	"shared/utilhttp"
+	"shared/utiltx"
 )
 
 type LoginService struct {
 	repo db.Querier
+	tx   utiltx.Transactor
 }
 
-func NewLoginService(repo db.Querier) LoginService {
-	return LoginService{repo}
+func NewLoginService(repo db.Querier, tx utiltx.Transactor) LoginService {
+	return LoginService{repo: repo, tx: tx}
 }
 
 func (s LoginService) Post(ctx context.Context, input domain.LoginInput) (*domain.Token, error) {

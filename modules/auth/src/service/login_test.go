@@ -50,7 +50,7 @@ func TestLoginService_Post_returnsTokenForValidCredentials(t *testing.T) {
 		},
 	}
 
-	got, err := NewLoginService(repo).Post(
+	got, err := NewLoginService(repo, nil).Post(
 		context.Background(),
 		domain.NewLoginInput(inputEmail, password),
 	)
@@ -77,7 +77,7 @@ func TestLoginService_Post_returnsUnauthorizedOnPasswordMismatch(t *testing.T) {
 		},
 	}
 
-	got, err := NewLoginService(repo).Post(
+	got, err := NewLoginService(repo, nil).Post(
 		context.Background(),
 		domain.NewLoginInput("alice@example.com", "wrong_pw"),
 	)
@@ -102,7 +102,7 @@ func TestLoginService_Post_wrapsRepoErrorAsDBError(t *testing.T) {
 		},
 	}
 
-	got, err := NewLoginService(repo).Post(
+	got, err := NewLoginService(repo, nil).Post(
 		context.Background(),
 		domain.NewLoginInput("alice@example.com", "pw1234"),
 	)

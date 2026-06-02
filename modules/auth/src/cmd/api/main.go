@@ -15,6 +15,7 @@ import (
 	"shared/utilcache"
 	"shared/utillog"
 	"shared/utilotel"
+	"shared/utiltx"
 	"syscall"
 	"time"
 
@@ -87,7 +88,8 @@ func run() error {
 	}
 
 	// ===== DI =====
-	h := route.NewHandler(service.NewLoginService(db.New(connDB)))
+	tx := utiltx.NewTransactor(connDB)
+	h := route.NewHandler(service.NewLoginService(db.New(connDB), tx))
 
 	// ===== start server =====
 	srv := &http.Server{
